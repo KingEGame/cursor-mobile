@@ -31,8 +31,9 @@ export function checkApkDump({ badging, manifestTree }, expectedVersionCode) {
   if (!/uses-permission: name='android\.permission\.REQUEST_INSTALL_PACKAGES'/.test(badging)) {
     problems.push("missing REQUEST_INSTALL_PACKAGES (self-update cannot open the installer)");
   }
-  // xmltree prints: A: android:usesCleartextTraffic(0x010104ec)=(type 0x12)0xffffffff
-  if (!/usesCleartextTraffic\([^)]*\)=\(type 0x12\)0xffffffff/.test(manifestTree)) {
+  // xmltree prints either `usesCleartextTraffic(0x010104ec)=(type 0x12)0xffffffff`
+  // (older aapt2) or `usesCleartextTraffic(0x010104ec)=true` (build-tools 36).
+  if (!/usesCleartextTraffic\([^)]*\)=(?:\(type 0x12\)0xffffffff|true)\b/.test(manifestTree)) {
     problems.push("usesCleartextTraffic is not true — the app could not reach the Hub over Tailscale HTTP");
   }
   return problems;

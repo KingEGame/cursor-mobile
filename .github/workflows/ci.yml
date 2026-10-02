@@ -1,5 +1,9 @@
-# Same release gate as the PC pre-push hook, on a clean machine.
+# Same release gate as the PC pre-push hook, on a clean checkout.
 # gate → android-apk (needs gate) → release (tags v*, needs both).
+# Runs on node1 (self-hosted runner, labels: node1, android) — set up with
+#   bash scripts/ci/install-node1-runner.sh
+# node1 provides JDK 17 + Android SDK via ~/actions-runner/.env. It is
+# build/test infrastructure only and never runs the Hub or any sync.
 # The phone never downloads from here directly: on the PC run
 #   npm run publish:apk:github
 # and the Hub serves that release over Tailscale (product lock: PC-local sync).
@@ -22,7 +26,7 @@ permissions:
 jobs:
   gate:
     name: gate (build + all tests)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, node1]
     timeout-minutes: 25
     outputs:
       tests-passed: ${{ steps.gate.outputs.tests-passed }}
@@ -49,7 +53,7 @@ jobs:
   android-apk:
     name: android-apk (signed release)
     needs: gate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, node1]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -59,11 +63,8 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
+      # JDK 17 + Android SDK come from node1 (runner .env); ~/.gradle persists between runs.
+      - run: java -version && echo "ANDROID_HOME=$ANDROID_HOME"
       - run: npm ci
 
       - name: Tag matches app version
@@ -122,7 +123,7 @@ jobs:
     name: release (tag)
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [gate, android-apk]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, node1]
     permissions:
       contents: write
     steps:

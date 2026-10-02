@@ -44,9 +44,15 @@ Note: the hook tests the **working tree**; CI tests the pushed commit only.
 `publish-apk-to-hub.mjs --manifest-only`) → `release` (tags `v*` only; tag must equal
 `apps/mobile/app.json` version).
 
+**Runner: node1** (self-hosted, labels `node1`, `android`; every job has `runs-on: [self-hosted, node1]`).
+Provisioned without sudo by `bash scripts/ci/install-node1-runner.sh` from the PC: JDK 17 +
+Android cmdline-tools under `~/ci`, `gh` in `~/.local/bin`, runner in `~/actions-runner` as the
+`github-runner` systemd --user service (linger on). node1 only builds and tests — the Hub and
+all sync stay on the operator PC.
+
 Repo setup the operator does once:
 
-1. Create a **private** GitHub repo, add it as `origin`, push.
+1. Done 2026-10-02: private repo `KingEGame/cursor-mobile` (`origin`), runner node1 online.
 2. Branch protection on `main`: require `gate` and `android-apk`.
 3. Optional signing secrets: `CM_KEYSTORE_BASE64`, `CM_KEYSTORE_PASSWORD`, `CM_KEY_ALIAS`, `CM_KEY_PASSWORD`.
 

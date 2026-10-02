@@ -101,6 +101,12 @@ describe("hook + CI wiring", () => {
     assert.match(ci, /bash scripts\/release-gate\.sh/);
     assert.match(ci, /needs: gate/);
   });
+  it("CI jobs all run on the node1 self-hosted runner", () => {
+    const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+    const runsOn = ci.match(/runs-on: .*/g) ?? [];
+    assert.ok(runsOn.length >= 3);
+    for (const r of runsOn) assert.equal(r, "runs-on: [self-hosted, node1]");
+  });
 });
 
 describe("verify-apk checks the built APK", () => {
@@ -114,6 +120,12 @@ describe("verify-apk checks the built APK", () => {
 
   it("accepts a good release", () => {
     assert.deepEqual(checkApkDump({ badging, manifestTree: cleartextOn }, 101), []);
+  });
+  it("accepts the build-tools 36 aapt2 spelling (=true)", () => {
+    const tree =
+      "E: application\n  A: http://schemas.android.com/apk/res/android:usesCleartextTraffic(0x010104ec)=true";
+    assert.deepEqual(checkApkDump({ badging, manifestTree: tree }, 101), []);
+    assert.match(checkApkDump({ badging, manifestTree: tree.replace("=true", "=false") }, 101).join(), /usesCleartextTraffic/);
   });
   it("refuses an APK without cleartext (it could never reach the Hub to self-update)", () => {
     const p = checkApkDump({ badging, manifestTree: "E: application" }, 101);
