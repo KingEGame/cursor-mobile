@@ -12,3 +12,7 @@ packages/hub/data/
 
 # Release gate logs
 .gate/
+
+# Expo native modules: Gradle build output
+apps/mobile/modules/*/android/build/
+apps/mobile/modules/*/android/.cxx/
