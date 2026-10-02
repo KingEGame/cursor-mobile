@@ -17,10 +17,16 @@ import {
 import type { ActionSelector } from "./selector-pack.js";
 
 export type ChatSendResult =
-  | { ok: true; switched: boolean; methods: string[] }
+  | { ok: true; switched: boolean; methods: string[]; composerId?: string }
   | {
       ok: false;
-      code: "CHAT_NOT_IN_SIDEBAR" | "CHAT_SWITCH_FAILED" | "CDP_INPUT_FAILED" | "NOT_RUNNING";
+      code:
+        | "CHAT_NOT_IN_SIDEBAR"
+        | "CHAT_SWITCH_FAILED"
+        | "CDP_INPUT_FAILED"
+        | "NOT_RUNNING"
+        | "PROJECT_NOT_IN_SIDEBAR"
+        | "NEW_CHAT_FAILED";
       error: string;
       methods: string[];
     };
@@ -176,6 +182,111 @@ export async function stopAgentChat(
     }
     await dispatchClick(client, hit.box.x, hit.box.y, methods);
     return { ok: true, switched: opened.switched, methods };
+  } catch (err) {
+    return {
+      ok: false,
+      code: "CDP_INPUT_FAILED",
+      error: err instanceof Error ? err.message : String(err),
+      methods,
+    };
+  }
+}
+
+/**
+ * Start a new Agents chat in one project and send its first message.
+ *
+ * The project's "New Agent" button only gets a size on real hover, so it is clicked
+ * from page script. Success is proven before typing: the active row must be a new row in
+ * that project's sidebar section (or its existing empty "New Agent" draft, which Cursor
+ * re-focuses), and the composer must be empty.
+ */
+export async function newAgentChat(
+  client: CdpClient,
+  sectionId: string,
+  text: string,
+  sendSelector: ActionSelector,
+  opts: { wait?: Wait; timeoutMs?: number } = {},
+): Promise<ChatSendResult> {
+  const methods: string[] = [];
+  const wait = opts.wait ?? realWait;
+  const section = `section[data-agent-drop-section-id=${JSON.stringify(sectionId)}]`;
+  const rowKeys = `[...document.querySelectorAll(${JSON.stringify(`${section} li[data-sidebar-item-key^="row:"]`)})].map((li) => li.getAttribute("data-sidebar-item-key").slice(4))`;
+  try {
+    const before = await evaluate<string[] | null>(
+      client,
+      `(() => document.querySelector(${JSON.stringify(section)}) ? ${rowKeys} : null)()`,
+      methods,
+    );
+    if (!before) {
+      return { ok: false, code: "PROJECT_NOT_IN_SIDEBAR", error: "Project is not in the PC Agents sidebar", methods };
+    }
+    const clicked = await evaluate<boolean>(
+      client,
+      `(() => { const b = document.querySelector(${JSON.stringify(`${section} [data-section-head] button[aria-label="New Agent"]`)}); if (!b) return false; b.click(); return true; })()`,
+      methods,
+    );
+    if (!clicked) {
+      return { ok: false, code: "NEW_CHAT_FAILED", error: "No New Agent button for this project", methods };
+    }
+
+    const known = new Set(before);
+    let created: string | null = null;
+    for (let waited = 0; waited <= (opts.timeoutMs ?? 3000) && !created; waited += 150) {
+      await wait(150);
+      created = await evaluate<string | null>(
+        client,
+        `(() => {
+          const known = new Set(${JSON.stringify([...known])});
+          const ed = document.querySelector(".ui-prompt-input-editor__input[contenteditable='true']");
+          if (!ed || ed.textContent.trim() !== "") return null;
+          for (const li of document.querySelectorAll(${JSON.stringify(`${section} li[data-sidebar-item-key^="row:"]`)})) {
+            const id = li.getAttribute("data-sidebar-item-key").slice(4);
+            const btn = li.querySelector("[data-sidebar-menu-button]");
+            if (!btn || btn.getAttribute("data-active") !== "true") continue;
+            // A brand-new row, or Cursor re-focusing this project's existing empty draft.
+            const title = (li.querySelector(".ui-sidebar-menu-button-content") || {}).textContent || "";
+            if (!known.has(id) || title.trim() === "New Agent") return id;
+          }
+          return null;
+        })()`,
+        methods,
+      );
+    }
+    if (!created) {
+      return {
+        ok: false,
+        code: "NEW_CHAT_FAILED",
+        error: "Cursor did not open a new chat in that project — nothing was typed",
+        methods,
+      };
+    }
+
+    const typed = await executeTypeAndSubmit(client, "send_message", sendSelector, text);
+    methods.push(...typed.methods);
+    if (!typed.ok) return { ok: false, code: "CDP_INPUT_FAILED", error: typed.error, methods };
+
+    // Cursor promotes the draft to a new composer id on the first send; report the id the
+    // chat actually has afterwards, so the phone opens the chat with the message in it.
+    let finalId = created;
+    for (let waited = 0; waited <= (opts.timeoutMs ?? 5000); waited += 250) {
+      await wait(250);
+      const active = await evaluate<string | null>(
+        client,
+        `(() => {
+          for (const li of document.querySelectorAll(${JSON.stringify(`${section} li[data-sidebar-item-key^="row:"]`)})) {
+            const btn = li.querySelector("[data-sidebar-menu-button]");
+            if (btn && btn.getAttribute("data-active") === "true") return li.getAttribute("data-sidebar-item-key").slice(4);
+          }
+          return null;
+        })()`,
+        methods,
+      );
+      if (active && active !== created) {
+        finalId = active;
+        break;
+      }
+    }
+    return { ok: true, switched: true, methods, composerId: finalId };
   } catch (err) {
     return {
       ok: false,

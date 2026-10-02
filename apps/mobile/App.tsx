@@ -16,6 +16,7 @@ import { MainTabsScreen } from './src/screens/MainTabsScreen';
 import { LiveChatScreen } from './src/screens/LiveChatScreen';
 import { HistoryReadScreen } from './src/screens/HistoryReadScreen';
 import { ChatChangesScreen } from './src/screens/ChatChangesScreen';
+import { NewAgentChatScreen } from './src/screens/NewAgentChatScreen';
 import { LockGate } from './src/components/LockGate';
 import { syncPcWatch } from './src/notifications/pc-watch';
 import { NewSessionScreen } from './src/screens/NewSessionScreen';
@@ -251,6 +252,11 @@ function RootNavigator() {
         name="HistoryRead"
         component={HistoryReadScreen}
         options={{ title: 'Chat' }}
+      />
+      <Stack.Screen
+        name="NewAgentChat"
+        component={NewAgentChatScreen}
+        options={{ title: 'New chat', presentation: 'modal' }}
       />
       <Stack.Screen
         name="ChatChanges"

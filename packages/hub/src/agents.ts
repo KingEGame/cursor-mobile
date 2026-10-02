@@ -67,6 +67,8 @@ export interface AgentsProjectRow {
   name: string;
   path: string | null;
   hasMore: boolean;
+  /** Expanded in the PC sidebar (null when unknown / fallback). */
+  expanded: boolean | null;
   chats: AgentsChatRow[];
 }
 
@@ -104,6 +106,7 @@ export function buildAgentsResponse(
           sec.chats.map((c) => details.get(c.composerId)?.projectPath).find(Boolean) ??
           null,
         hasMore: sec.hasMore,
+        expanded: sec.expanded,
         chats: sec.chats.map((c) => {
           const d = details.get(c.composerId);
           return {
@@ -135,6 +138,7 @@ export function buildAgentsResponse(
       name: g.name,
       path: g.path,
       hasMore: false,
+      expanded: null,
       chats: g.chats.map((d) => ({
         sessionId: d.sessionId,
         composerId: d.composerId,

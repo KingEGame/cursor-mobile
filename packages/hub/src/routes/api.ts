@@ -1685,6 +1685,32 @@ export function createApiRouter(ctx: HubContext): Router {
     }),
   );
 
+  // Start a new chat in one sidebar project and send its first message.
+  router.post(
+    "/agents/projects/new",
+    requirePaired(ctx),
+    asyncRoute(async (req, res) => {
+      const sectionId = typeof req.body?.projectId === "string" ? req.body.projectId.trim() : "";
+      const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+      if (!/^(workspace|repo):[\w.\-/:@]{1,200}$/.test(sectionId)) {
+        throw new ApiError(400, "VALIDATION_ERROR", "projectId must be an Agents sidebar project id");
+      }
+      if (!text || text.length > 20_000) {
+        throw new ApiError(400, "VALIDATION_ERROR", "text is required (max 20000 chars)");
+      }
+      const result = await ctx.live.newAgentChat(sectionId, text);
+      if (!result.ok) {
+        const status = result.code === "PROJECT_NOT_IN_SIDEBAR" ? 404 : result.code === "NEW_CHAT_FAILED" ? 409 : 503;
+        throw new ApiError(status, result.code, result.error);
+      }
+      res.status(202).json({
+        ok: true,
+        composerId: result.composerId ?? null,
+        sessionId: result.composerId ? `hist_${result.composerId}` : null,
+      });
+    }),
+  );
+
   router.post(
     "/agents/chats/:composerId/stop",
     requirePaired(ctx),

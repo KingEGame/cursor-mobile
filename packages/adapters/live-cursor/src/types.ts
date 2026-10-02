@@ -323,4 +323,7 @@ export interface LiveCursorAdapter {
 
   /** Open `composerId` on the PC and click Stop generation; NOT_RUNNING when idle. */
   stopAgentChat(composerId: string): Promise<ChatSendResult>;
+
+  /** Start a new chat in a sidebar project (verified new active row) and send `text`. */
+  newAgentChat(sectionId: string, text: string): Promise<ChatSendResult>;
 }

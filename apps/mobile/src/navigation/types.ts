@@ -31,6 +31,8 @@ export type RootStackParamList = {
   Home: undefined;
   LiveChat: { sessionId: string; title?: string; prefill?: string; autosend?: boolean };
   HistoryRead: { sessionId: string; title?: string };
+  /** Start a new Agents chat in a PC project (Home → New Chat). */
+  NewAgentChat: { projectId?: string } | undefined;
   /** Files an Agents chat changed; `index` set → that file's diff. */
   ChatChanges: { composerId: string; title?: string; index?: number; path?: string };
   /**

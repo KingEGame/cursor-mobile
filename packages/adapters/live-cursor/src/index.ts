@@ -138,6 +138,7 @@ export {
   openAgentChat,
   readOpenChatId,
   sendToAgentChat,
+  newAgentChat,
   STOP_GENERATION_SELECTORS,
   stopAgentChat,
 } from "./chat-send.js";

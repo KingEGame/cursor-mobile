@@ -101,6 +101,11 @@ describe("hook + CI wiring", () => {
     assert.match(ci, /bash scripts\/release-gate\.sh/);
     assert.match(ci, /needs: gate/);
   });
+  it("a newer push to the same branch/PR cancels the older run (tags never cancelled)", () => {
+    const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+    assert.match(ci, /concurrency:\s*\n\s*group: ci-\$\{\{ github\.ref \}\}/);
+    assert.match(ci, /cancel-in-progress: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/);
+  });
   it("CI jobs all run on the node1 self-hosted runner", () => {
     const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
     const runsOn = ci.match(/runs-on: .*/g) ?? [];

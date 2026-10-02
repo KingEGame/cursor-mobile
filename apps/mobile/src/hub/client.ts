@@ -296,6 +296,17 @@ export class HubClient {
     });
   }
 
+  /**
+   * POST /v1/agents/projects/new — start a new chat in one sidebar project on the PC and
+   * send its first message. Returns the new chat's session id when Cursor reported one.
+   */
+  async newAgentChat(
+    projectId: string,
+    text: string,
+  ): Promise<{ ok: true; composerId: string | null; sessionId: string | null }> {
+    return this.request('POST', '/v1/agents/projects/new', { auth: true, body: { projectId, text } });
+  }
+
   /** POST /v1/agents/chats/:id/stop — click Stop generation for that chat on the PC. */
   async stopAgentChat(composerId: string): Promise<{ ok: true }> {
     return this.request('POST', `/v1/agents/chats/${encodeURIComponent(composerId)}/stop`, {

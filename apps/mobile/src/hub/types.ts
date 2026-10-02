@@ -511,6 +511,8 @@ export interface AgentsProjectRow {
   name: string;
   path: string | null;
   hasMore: boolean;
+  /** Expanded in the PC sidebar; null when unknown (history fallback). */
+  expanded: boolean | null;
   chats: AgentsChatRow[];
 }
 

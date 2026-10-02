@@ -28,6 +28,7 @@ const res: AgentsResponse = {
       name: 'omnitouter',
       path: '/data/projects/omnitouter',
       hasMore: false,
+      expanded: true,
       chats: [chat({ title: 'Omnitouter and Laya project', status: 'waiting_approval' })],
     },
     {
@@ -35,6 +36,7 @@ const res: AgentsResponse = {
       name: 'cursor_mobile',
       path: '/data/projects/cursor_mobile',
       hasMore: true,
+      expanded: false,
       chats: [
         chat({ title: 'UI/UX planning discussion', linesAdded: 620, linesRemoved: 72 }),
         chat({ title: 'Mobile app for PC control', status: 'working', activeOnPc: true }),

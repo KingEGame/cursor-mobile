@@ -23,7 +23,7 @@ export function MainTabsScreen({ navigation }: Props) {
     <View style={styles.root}>
       <View style={styles.body}>
         {tab === 'chats' ? (
-          <ChatsHomeScreen navigation={navigation} />
+          <ChatsHomeScreen navigation={navigation} onOpenAccount={() => setTab('account')} />
         ) : (
           <AccountScreen navigation={navigation} />
         )}

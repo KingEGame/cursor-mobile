@@ -11,6 +11,15 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  Plus,
+  Search,
+  Settings,
+  SquarePen,
+} from 'lucide-react-native';
 import { ConnectionChip } from '../components/ConnectionChip';
 import {
   agentRowMeta,
@@ -18,11 +27,10 @@ import {
   countWaiting,
   filterAgents,
 } from '../hub/agents-list';
-import { createHubClient, isLivePathDegraded } from '../hub/client';
+import { createHubClient } from '../hub/client';
 import { deriveConnectionState } from '../hub/connection-state';
 import {
   HubApiError,
-  isWorkspaceBound,
   type AgentsChatRow,
   type AgentsProjectRow,
   type AgentsResponse,
@@ -37,6 +45,8 @@ const POLL_MS = 15_000;
 
 interface Props {
   navigation: RootNav;
+  /** Profile footer gear → Account tab (same destination as the tab bar). */
+  onOpenAccount?: () => void;
 }
 
 type ListEntry =
@@ -47,7 +57,7 @@ type ListEntry =
  * Chats home: the Cursor Agents-window list from the PC Hub (projects → chats),
  * refreshed on focus, on pull, on Hub WS events, and quietly every 15 s.
  */
-export function ChatsHomeScreen({ navigation }: Props) {
+export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
   const session = useAppSession();
   // Stable callbacks only — depending on `session` itself re-creates loaders on every
   // setHealthAndWorkspace and causes an endless refresh / WS reconnect loop.
@@ -59,6 +69,8 @@ export function ChatsHomeScreen({ navigation }: Props) {
   const [agents, setAgents] = useState<AgentsResponse | null>(null);
   const [lastApiError, setLastApiError] = useState<HubApiError | null>(null);
   const [query, setQuery] = useState('');
+  /** Phone-side collapse toggles; untouched projects follow the PC sidebar. */
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const inFlight = useRef(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -165,18 +177,26 @@ export function ChatsHomeScreen({ navigation }: Props) {
 
   const listData: ListEntry[] = useMemo(() => {
     const rows: ListEntry[] = [];
+    const searching = query.trim() !== '';
     for (const project of visible?.projects ?? []) {
       rows.push({ kind: 'header', project });
+      // Searching always shows matches; otherwise phone toggle, else the PC's state.
+      const isCollapsed = !searching && (collapsed[project.projectId] ?? project.expanded === false);
+      if (isCollapsed) continue;
       for (const chat of project.chats) {
         rows.push({ kind: 'chat', chat, projectId: project.projectId });
       }
     }
     return rows;
-  }, [visible]);
+  }, [visible, collapsed, query]);
+
+  const isCollapsed = (project: AgentsProjectRow) =>
+    query.trim() === '' && (collapsed[project.projectId] ?? project.expanded === false);
+  const toggleProject = (project: AgentsProjectRow) =>
+    setCollapsed((prev) => ({ ...prev, [project.projectId]: !isCollapsed(project) }));
 
   const waiting = countWaiting(agents);
-  const bound = !!(session.workspace && isWorkspaceBound(session.workspace));
-  const degraded = isLivePathDegraded(session.health);
+  const hubName = session.hubDisplayName || 'Desk PC';
 
   const openChat = (chat: AgentsChatRow) => {
     navigation.navigate('HistoryRead', { sessionId: chat.sessionId, title: chat.title });
@@ -200,7 +220,19 @@ export function ChatsHomeScreen({ navigation }: Props) {
         />
       </View>
 
+      <Pressable
+        style={({ pressed }) => [styles.newChat, pressed && styles.rowPressed]}
+        onPress={() => navigation.navigate('NewAgentChat')}
+        accessibilityRole="button"
+        accessibilityLabel="New Chat"
+        testID="chats-new-chat"
+      >
+        <SquarePen size={20} color={colors.text} strokeWidth={1.75} />
+        <Text style={styles.newChatText}>New Chat</Text>
+      </Pressable>
+
       <View style={styles.searchWrap}>
+        <Search size={18} color={colors.muted} strokeWidth={1.75} style={styles.searchIcon} />
         <TextInput
           value={query}
           onChangeText={setQuery}
@@ -270,14 +302,39 @@ export function ChatsHomeScreen({ navigation }: Props) {
         }
         renderItem={({ item: row }) => {
           if (row.kind === 'header') {
+            const closed = isCollapsed(row.project);
+            const Chevron = closed ? ChevronRight : ChevronDown;
             return (
               <View style={styles.sectionHeader} testID={`project-${row.project.projectId}`}>
-                <Text style={styles.sectionTitle} numberOfLines={1}>
-                  {row.project.name}
-                </Text>
-                {row.project.hasMore ? (
-                  <Text style={styles.sectionMeta}>More on PC</Text>
-                ) : null}
+                <Pressable
+                  style={styles.sectionToggle}
+                  onPress={() => toggleProject(row.project)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: !closed }}
+                  accessibilityLabel={`${row.project.name}, ${row.project.chats.length} chats`}
+                >
+                  <Chevron size={16} color={colors.muted} strokeWidth={2} />
+                  <Folder size={16} color={colors.muted} strokeWidth={1.75} />
+                  <Text style={styles.sectionTitle} numberOfLines={1}>
+                    {row.project.name}
+                  </Text>
+                  {closed ? (
+                    <Text style={styles.sectionMeta}>{row.project.chats.length}</Text>
+                  ) : row.project.hasMore ? (
+                    <Text style={styles.sectionMeta}>More on PC</Text>
+                  ) : null}
+                </Pressable>
+                <Pressable
+                  style={styles.sectionAdd}
+                  hitSlop={8}
+                  onPress={() =>
+                    navigation.navigate('NewAgentChat', { projectId: row.project.projectId })
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`New chat in ${row.project.name}`}
+                >
+                  <Plus size={18} color={colors.muted} strokeWidth={1.75} />
+                </Pressable>
               </View>
             );
           }
@@ -328,22 +385,21 @@ export function ChatsHomeScreen({ navigation }: Props) {
         }}
       />
 
-      {bound ? (
-        <Pressable
-          style={[
-            styles.fab,
-            { bottom: 16 + insets.bottom },
-            degraded && styles.fabMuted,
-          ]}
-          onPress={() => navigation.navigate('NewSession')}
-          accessibilityRole="button"
-          accessibilityLabel="New chat"
-          testID="chats-new-chat"
-          collapsable={false}
-        >
-          <Text style={styles.fabText}>New chat</Text>
-        </Pressable>
-      ) : null}
+      <Pressable
+        style={({ pressed }) => [styles.profile, pressed && styles.rowPressed]}
+        onPress={onOpenAccount}
+        accessibilityRole="button"
+        accessibilityLabel="Account and settings"
+        testID="chats-profile"
+      >
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{hubName.slice(0, 1).toUpperCase()}</Text>
+        </View>
+        <Text style={styles.profileName} numberOfLines={1}>
+          {hubName}
+        </Text>
+        <Settings size={20} color={colors.muted} strokeWidth={1.75} />
+      </Pressable>
     </View>
   );
 }
@@ -364,8 +420,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.4,
   },
-  searchWrap: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  newChat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 48,
+    marginHorizontal: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.sm,
+  },
+  newChatText: { color: colors.text, fontSize: 16, fontWeight: '600' },
+  searchWrap: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm, justifyContent: 'center' },
+  searchIcon: { position: 'absolute', left: spacing.md + spacing.sm, zIndex: 1 },
   search: {
+    paddingLeft: spacing.xl + spacing.xs,
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderWidth: StyleSheet.hairlineWidth,
@@ -397,7 +465,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
   },
-  listContent: { paddingBottom: 96 },
+  listContent: { paddingBottom: spacing.lg },
   emptyContainer: { flexGrow: 1, justifyContent: 'center', padding: spacing.lg },
   empty: { alignItems: 'center', gap: spacing.md },
   emptyTitle: {
@@ -415,15 +483,23 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.lg,
-    paddingBottom: 4,
+    alignItems: 'center',
+    paddingLeft: spacing.sm,
+    paddingRight: spacing.md,
+    paddingTop: spacing.sm,
     backgroundColor: colors.bg,
   },
-  sectionTitle: {
+  sectionToggle: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minHeight: 44,
+    paddingHorizontal: spacing.sm,
+  },
+  sectionAdd: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  sectionTitle: {
+    flexShrink: 1,
     color: colors.text,
     fontSize: type.body,
     fontWeight: '600',
@@ -458,25 +534,24 @@ const styles = StyleSheet.create({
   rowMetaWarn: { color: colors.warn, fontWeight: '600' },
   rowMetaError: { color: colors.danger },
   age: { color: colors.muted, fontSize: type.meta, marginLeft: spacing.sm },
-  fab: {
-    position: 'absolute',
-    right: spacing.md,
-    backgroundColor: colors.accent,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderRadius: radii.pill,
+  profile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     minHeight: 52,
+    paddingHorizontal: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    backgroundColor: colors.bg,
+  },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
     justifyContent: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
   },
-  fabMuted: { opacity: 0.85 },
-  fabText: {
-    color: colors.accentText,
-    fontWeight: '700',
-    fontSize: type.body,
-  },
+  avatarText: { color: colors.accentText, fontWeight: '700' },
+  profileName: { flex: 1, color: colors.text, fontSize: 15 },
 });

@@ -1,6 +1,7 @@
 import {
   sendToAgentChat as sendAgentChatMessage,
   stopAgentChat as stopAgentChatRun,
+  newAgentChat as newAgentChatRun,
   type ChatSendResult,
 } from "./chat-send.js";
 import {
@@ -937,6 +938,41 @@ export class LiveCursorAdapterImpl implements LiveCursorAdapter {
     }
   }
 
+  async newAgentChat(sectionId: string, text: string): Promise<ChatSendResult> {
+    const health = await this.getHealth();
+    if (health.state === "cursor_down") {
+      return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor CDP unreachable", methods: [] };
+    }
+    if (!isActionVerified(this.selectorPack, "send_message")) {
+      return {
+        ok: false,
+        code: "CDP_INPUT_FAILED",
+        error: "send_message not VERIFIED — refuse to type into Cursor (fail-closed)",
+        methods: [],
+      };
+    }
+    const debuggerUrl = this.resolveDebuggerUrl();
+    if (!debuggerUrl) {
+      return { ok: false, code: "CDP_INPUT_FAILED", error: "No loopback CDP debugger URL", methods: [] };
+    }
+    let client;
+    try {
+      client = await this.cdpClientFactory(debuggerUrl);
+    } catch (err) {
+      return {
+        ok: false,
+        code: "CDP_INPUT_FAILED",
+        error: err instanceof Error ? err.message : "Failed to open CDP session",
+        methods: [],
+      };
+    }
+    try {
+      return await newAgentChatRun(client, sectionId, text, this.selectorPack.pack.actions.send_message);
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
   async stopAgentChat(composerId: string): Promise<ChatSendResult> {
     const health = await this.getHealth();
     if (health.state === "cursor_down") {
@@ -1552,6 +1588,17 @@ export function createMockLiveCursorAdapter(
       }
       sentToAgentChats.push({ composerId, text });
       return { ok: true, switched: true, methods: ["Runtime.evaluate", "Input.insertText"] };
+    },
+    async newAgentChat(sectionId, text) {
+      if (healthState !== "cdp_ok") {
+        return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor down", methods: [] };
+      }
+      const section = (overrides.sidebarSections ?? []).find((sec) => sec.sectionId === sectionId);
+      if (!section) {
+        return { ok: false, code: "PROJECT_NOT_IN_SIDEBAR", error: "Project is not in the PC Agents sidebar", methods: [] };
+      }
+      sentToAgentChats.push({ composerId: `new:${sectionId}`, text });
+      return { ok: true, switched: true, methods: ["Runtime.evaluate"], composerId: "00000000-0000-4000-8000-000000000001" };
     },
     async stopAgentChat(composerId) {
       if (healthState !== "cdp_ok") {
