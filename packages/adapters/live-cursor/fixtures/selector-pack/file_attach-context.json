@@ -1,0 +1,14 @@
+{
+  "id": "file_attach-context",
+  "action": "file_attach",
+  "recordedAgainst": "synthetic-fixture (not live Cursor)",
+  "recordedAt": "2026-09-25T00:00:00.000Z",
+  "domSnippet": "<div class=\"composer-bar\"><button type=\"button\" aria-label=\"Add Context @\" title=\"Attach\">@</button><button type=\"button\" aria-label=\"Attach file\">Attach</button><button type=\"button\" aria-label=\"Add Context\">Add Context</button></div>",
+  "expectedStrategyHits": [
+    "[aria-label*='Attach']",
+    "[aria-label*='@']",
+    ".composer-bar [aria-label*='Attach']",
+    "[aria-label*='Add Context']"
+  ],
+  "notes": "Synthetic @file / attach controls — paths still validated under workspace roots at Hub."
+}

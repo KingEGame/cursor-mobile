@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Cursor Mobile",
+    "slug": "cursor-mobile",
+    "version": "0.1.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "cursor-companion",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f1419"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "local.cursor.mobile"
+    },
+    "android": {
+      "package": "local.cursor.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f1419",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "extra": {
+      "hubUrl": "http://100.108.160.99:8787",
+      "eas": {
+        "projectId": "TODO-create-eas-project"
+      }
+    }
+  }
+}

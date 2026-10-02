@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Installed by `npm run hooks:install` (git config core.hooksPath .githooks).
+# Blocks `git push` unless the release gate is green. Emergency bypass:
+# `git push --no-verify` — CI still blocks merge and release.
+set -uo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+
+# Branch deletes only: nothing to test.
+refs_seen=0
+only_deletes=1
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  refs_seen=1
+  case "$local_sha" in
+    *[!0]*) only_deletes=0 ;;
+  esac
+done
+if [ "$refs_seen" = "1" ] && [ "$only_deletes" = "1" ]; then exit 0; fi
+
+# The gate tests the working tree; warn if it differs from what is being pushed.
+if ! git -C "$ROOT" diff --quiet HEAD -- 2>/dev/null; then
+  echo "pre-push: note — uncommitted changes are included in this test run (CI tests the commit only)."
+fi
+
+exec bash "$ROOT/scripts/release-gate.sh"

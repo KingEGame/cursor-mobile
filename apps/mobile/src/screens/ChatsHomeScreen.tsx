@@ -6,66 +6,60 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChatListRow } from '../components/ChatListRow';
 import { ConnectionChip } from '../components/ConnectionChip';
 import {
-  buildProjectSections,
-  chatsEmptyCopy,
-  mergeSessionsByRecency,
-  type ProjectSection,
-} from '../hub/chats-home';
+  agentRowMeta,
+  agentsSyncHint,
+  countWaiting,
+  filterAgents,
+} from '../hub/agents-list';
 import { createHubClient, isLivePathDegraded } from '../hub/client';
-import {
-  deriveConnectionState,
-} from '../hub/connection-state';
-import { HISTORY_LIST_LIMIT } from '../hub/history-list';
-import { canOpenSessionFromList } from '../hub/session-list-ux';
+import { deriveConnectionState } from '../hub/connection-state';
 import {
   HubApiError,
   isWorkspaceBound,
-  type SessionListItem,
+  type AgentsChatRow,
+  type AgentsProjectRow,
+  type AgentsResponse,
 } from '../hub/types';
 import { HubWebSocket } from '../hub/ws';
 import type { RootNav } from '../navigation/types';
 import { useAppSession } from '../session/AppSessionContext';
 import { colors, radii, spacing, type } from '../theme';
 
-function formatSyncedAgo(at: Date | null): string | null {
-  if (!at) return null;
-  const sec = Math.max(0, Math.floor((Date.now() - at.getTime()) / 1000));
-  if (sec < 15) return 'Synced just now';
-  if (sec < 60) return `Synced ${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `Synced ${min}m ago`;
-  return `Synced ${Math.floor(min / 60)}h ago`;
-}
+/** Background refresh while Chats is visible — the PC sidebar has no push events yet. */
+const POLL_MS = 15_000;
 
 interface Props {
   navigation: RootNav;
 }
 
 type ListEntry =
-  | { kind: 'header'; section: ProjectSection }
-  | { kind: 'session'; item: SessionListItem };
+  | { kind: 'header'; project: AgentsProjectRow }
+  | { kind: 'chat'; chat: AgentsChatRow; projectId: string };
 
 /**
- * Chats home: PC Hub workspace / sessions only.
- * Refresh on mount, tab focus, pull-to-refresh, and Hub WS health/session events
- * so the list stays aligned with Composer chats on the chosen PC.
+ * Chats home: the Cursor Agents-window list from the PC Hub (projects → chats),
+ * refreshed on focus, on pull, on Hub WS events, and quietly every 15 s.
  */
 export function ChatsHomeScreen({ navigation }: Props) {
   const session = useAppSession();
+  // Stable callbacks only — depending on `session` itself re-creates loaders on every
+  // setHealthAndWorkspace and causes an endless refresh / WS reconnect loop.
+  const { setHealthAndWorkspace } = session;
   const insets = useSafeAreaInsets();
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [pulling, setPulling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [agents, setAgents] = useState<AgentsResponse | null>(null);
   const [lastApiError, setLastApiError] = useState<HubApiError | null>(null);
-  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
-  const [parityHint, setParityHint] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const inFlight = useRef(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connectionState = deriveConnectionState({
@@ -83,66 +77,44 @@ export function ChatsHomeScreen({ navigation }: Props) {
     });
   }, [session.hubBaseUrl, session.deviceToken]);
 
-  const refresh = useCallback(async () => {
-    if (!client) {
-      navigation.replace('Pair');
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const [health, workspace] = await Promise.all([
-        client.getHealth(),
-        client.getWorkspace(),
-      ]);
-      session.setHealthAndWorkspace(health, workspace);
-
-      if (!isWorkspaceBound(workspace)) {
-        setSessions([]);
-        setParityHint('Open a folder in Cursor on the PC, then refresh.');
-        setLastSyncedAt(new Date());
-        return;
-      }
-
-      const [live, history] = await Promise.all([
-        client.listSessions(workspace.workspaceId, {
-          mode: 'live',
-          limit: HISTORY_LIST_LIMIT,
-          tolerateMissing: true,
-        }),
-        client.listSessions(workspace.workspaceId, {
-          mode: 'history',
-          limit: HISTORY_LIST_LIMIT,
-          tolerateMissing: true,
-        }),
-      ]);
-      const merged = mergeSessionsByRecency(live.items, history.items);
-      setSessions(merged);
-      setLastApiError(null);
-      setLastSyncedAt(new Date());
-
-      const histMeta = history.history ?? live.history;
-      if (histMeta?.extractorStale) {
-        setParityHint('PC chat index may be behind — pull to refresh.');
-      } else if (health.liveAdapter?.state !== 'cdp_ok') {
-        setParityHint('Live Cursor degraded — showing Hub history for this PC project.');
-      } else {
-        setParityHint(
-          `${merged.length} chat${merged.length === 1 ? '' : 's'} from this PC`,
-        );
-      }
-    } catch (err) {
-      if (err instanceof HubApiError && err.status === 401) {
-        await session.clearDevice();
+  /** Silent by default; only a user pull shows the spinner. */
+  const refresh = useCallback(
+    async (opts?: { pull?: boolean }) => {
+      if (!client) {
         navigation.replace('Pair');
         return;
       }
-      if (err instanceof HubApiError) setLastApiError(err);
-      setError(err instanceof Error ? err.message : 'Refresh failed');
-    } finally {
-      setBusy(false);
-    }
-  }, [client, navigation, session]);
+      if (inFlight.current) return;
+      inFlight.current = true;
+      if (opts?.pull) setPulling(true);
+      try {
+        const [health, workspace, list] = await Promise.all([
+          client.getHealth(),
+          client.getWorkspace(),
+          client.listAgents(),
+        ]);
+        setHealthAndWorkspace(health, workspace);
+        setAgents(list);
+        setError(null);
+        setLastApiError(null);
+      } catch (err) {
+        if (err instanceof HubApiError && err.status === 401) {
+          // Background polls must not wipe pairing: a Hub restarted with another data
+          // dir answers 401 until the right one is back. Send the operator to Pair and
+          // keep the token; a successful re-pair overwrites it.
+          navigation.replace('Pair');
+          return;
+        }
+        if (err instanceof HubApiError) setLastApiError(err);
+        setError(err instanceof Error ? err.message : 'Refresh failed');
+      } finally {
+        inFlight.current = false;
+        setLoading(false);
+        setPulling(false);
+      }
+    },
+    [client, navigation, setHealthAndWorkspace],
+  );
 
   const scheduleRefresh = useCallback(() => {
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
@@ -154,13 +126,15 @@ export function ChatsHomeScreen({ navigation }: Props) {
   useFocusEffect(
     useCallback(() => {
       void refresh();
+      const id = setInterval(() => void refresh(), POLL_MS);
       return () => {
+        clearInterval(id);
         if (refreshTimer.current) clearTimeout(refreshTimer.current);
       };
     }, [refresh]),
   );
 
-  // Keep Home list in sync with Hub when health / sessions change on the PC.
+  // Hub health / session events → quick re-pull (debounced).
   useEffect(() => {
     if (!session.hubBaseUrl || !session.deviceToken) return;
     const ws = new HubWebSocket({
@@ -184,40 +158,37 @@ export function ChatsHomeScreen({ navigation }: Props) {
     };
   }, [session.hubBaseUrl, session.deviceToken, scheduleRefresh]);
 
-  const bound = !!(session.workspace && isWorkspaceBound(session.workspace));
-  const sections = useMemo(
-    () => buildProjectSections({ workspace: session.workspace, sessions }),
-    [session.workspace, sessions],
+  const visible = useMemo(
+    () => (agents ? filterAgents(agents, query) : null),
+    [agents, query],
   );
 
   const listData: ListEntry[] = useMemo(() => {
     const rows: ListEntry[] = [];
-    for (const section of sections) {
-      rows.push({ kind: 'header', section });
-      for (const item of section.sessions) {
-        rows.push({ kind: 'session', item });
+    for (const project of visible?.projects ?? []) {
+      rows.push({ kind: 'header', project });
+      for (const chat of project.chats) {
+        rows.push({ kind: 'chat', chat, projectId: project.projectId });
       }
     }
     return rows;
-  }, [sections]);
+  }, [visible]);
 
-  const openSession = (item: SessionListItem) => {
-    if (!canOpenSessionFromList(item.mode)) return;
-    if (item.mode === 'live') {
-      navigation.navigate('LiveChat', { sessionId: item.id, title: item.title });
-      return;
-    }
-    if (item.mode === 'history') {
-      navigation.navigate('HistoryRead', {
-        sessionId: item.id,
-        title: item.title,
-      });
-    }
+  const waiting = countWaiting(agents);
+  const bound = !!(session.workspace && isWorkspaceBound(session.workspace));
+  const degraded = isLivePathDegraded(session.health);
+
+  const openChat = (chat: AgentsChatRow) => {
+    navigation.navigate('HistoryRead', { sessionId: chat.sessionId, title: chat.title });
   };
 
-  const empty = chatsEmptyCopy(bound);
-  const degraded = isLivePathDegraded(session.health);
-  const syncedLabel = formatSyncedAgo(lastSyncedAt);
+  const showWaiting = () => {
+    if (!agents) return;
+    const first = agents.projects
+      .flatMap((p) => p.chats)
+      .find((c) => c.status === 'waiting_approval');
+    if (waiting === 1 && first) openChat(first);
+  };
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -229,16 +200,36 @@ export function ChatsHomeScreen({ navigation }: Props) {
         />
       </View>
 
-      {syncedLabel || parityHint ? (
+      <View style={styles.searchWrap}>
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search chats"
+          placeholderTextColor={colors.muted}
+          style={styles.search}
+          accessibilityLabel="Search chats"
+          autoCorrect={false}
+          returnKeyType="search"
+          testID="chats-search"
+        />
+      </View>
+
+      {agents ? (
+        <Text style={styles.syncHint} numberOfLines={2} testID="chats-sync-status">
+          {agentsSyncHint(agents)}
+        </Text>
+      ) : null}
+
+      {waiting > 0 ? (
         <Pressable
-          onPress={() => void refresh()}
+          onPress={showWaiting}
+          style={styles.waitingPill}
           accessibilityRole="button"
-          accessibilityLabel="Refresh chats from PC"
-          style={styles.syncRow}
-          testID="chats-sync-status"
+          testID="chats-waiting-pill"
         >
-          {syncedLabel ? <Text style={styles.syncMeta}>{syncedLabel}</Text> : null}
-          {parityHint ? <Text style={styles.syncHint}>{parityHint}</Text> : null}
+          <Text style={styles.waitingText}>
+            {waiting} waiting for approval{waiting === 1 ? ' →' : ''}
+          </Text>
         </Pressable>
       ) : null}
 
@@ -246,56 +237,94 @@ export function ChatsHomeScreen({ navigation }: Props) {
 
       <FlatList
         data={listData}
-        keyExtractor={(row, i) =>
-          row.kind === 'header' ? `h-${row.section.workspaceId}` : `s-${row.item.id}-${i}`
+        keyExtractor={(row) =>
+          row.kind === 'header'
+            ? `h-${row.project.projectId}`
+            : `c-${row.projectId}-${row.chat.composerId}`
         }
         refreshControl={
-          <RefreshControl refreshing={busy} onRefresh={refresh} tintColor={colors.accent} />
+          <RefreshControl
+            refreshing={pulling}
+            onRefresh={() => void refresh({ pull: true })}
+            tintColor={colors.accent}
+          />
         }
         contentContainerStyle={
           listData.length === 0 ? styles.emptyContainer : styles.listContent
         }
         ListEmptyComponent={
-          busy ? (
+          loading ? (
             <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.xl }} />
           ) : (
             <View style={styles.empty} testID="chats-empty">
-              <Text style={styles.emptyTitle}>{empty.title}</Text>
-              <Text style={styles.emptyBody}>{empty.body}</Text>
-              <Pressable
-                style={styles.primaryBtn}
-                onPress={() => {
-                  if (!bound) {
-                    navigation.navigate('Health');
-                    return;
-                  }
-                  navigation.navigate('NewSession');
-                }}
-                accessibilityRole="button"
-                testID="chats-empty-cta"
-              >
-                <Text style={styles.primaryBtnText}>{empty.cta}</Text>
-              </Pressable>
+              <Text style={styles.emptyTitle}>
+                {query.trim() ? 'No matching chats' : 'No chats yet'}
+              </Text>
+              <Text style={styles.emptyBody}>
+                {query.trim()
+                  ? 'Try another name, or clear Search.'
+                  : 'Open Cursor on the PC and start a chat in the Agents window.'}
+              </Text>
             </View>
           )
         }
         renderItem={({ item: row }) => {
           if (row.kind === 'header') {
             return (
-              <View style={styles.sectionHeader} testID={`project-section-${row.section.workspaceId}`}>
+              <View style={styles.sectionHeader} testID={`project-${row.project.projectId}`}>
                 <Text style={styles.sectionTitle} numberOfLines={1}>
-                  {row.section.name}
+                  {row.project.name}
                 </Text>
-                <Text style={styles.sectionMeta} numberOfLines={1}>
-                  {row.section.isOpenOnPc ? 'Open on PC' : 'From history'}
-                  {row.section.pendingApprovals > 0
-                    ? ` · ${row.section.pendingApprovals} approval`
-                    : ''}
-                </Text>
+                {row.project.hasMore ? (
+                  <Text style={styles.sectionMeta}>More on PC</Text>
+                ) : null}
               </View>
             );
           }
-          return <ChatListRow item={row.item} onPress={openSession} />;
+          const { chat } = row;
+          const meta = agentRowMeta(chat);
+          const warn = chat.status === 'waiting_approval';
+          const failed = chat.status === 'error';
+          return (
+            <Pressable
+              onPress={() => openChat(chat)}
+              style={({ pressed }) => [
+                styles.row,
+                chat.activeOnPc && styles.rowActive,
+                pressed && styles.rowPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`${chat.title}${meta ? `, ${meta}` : ''}`}
+              testID={`chat-${chat.composerId}`}
+            >
+              <View
+                style={[
+                  styles.mark,
+                  chat.status === 'working' && styles.markWorking,
+                  warn && styles.markWarn,
+                  failed && styles.markError,
+                  chat.unread && chat.status === 'idle' && styles.markUnread,
+                ]}
+              />
+              <View style={styles.rowBody}>
+                <Text
+                  style={[styles.rowTitle, chat.unread && styles.rowTitleUnread]}
+                  numberOfLines={1}
+                >
+                  {chat.title}
+                </Text>
+                {meta ? (
+                  <Text
+                    style={[styles.rowMeta, warn && styles.rowMetaWarn, failed && styles.rowMetaError]}
+                    numberOfLines={1}
+                  >
+                    {meta}
+                  </Text>
+                ) : null}
+              </View>
+              {chat.ageLabel ? <Text style={styles.age}>{chat.ageLabel}</Text> : null}
+            </Pressable>
+          );
         }}
       />
 
@@ -335,24 +364,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.4,
   },
-  error: {
-    color: colors.danger,
+  searchWrap: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  search: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.sm,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  syncRow: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-    gap: 2,
-  },
-  syncMeta: {
-    color: colors.muted,
-    fontSize: 12,
+    minHeight: 44,
+    color: colors.text,
+    fontSize: type.body,
   },
   syncHint: {
     color: colors.muted,
     fontSize: 12,
     lineHeight: 16,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  waitingPill: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    minHeight: 40,
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    backgroundColor: '#fff4e0',
+  },
+  waitingText: { color: colors.warn, fontWeight: '600', fontSize: type.meta },
+  error: {
+    color: colors.danger,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
   },
   listContent: { paddingBottom: 96 },
   emptyContainer: { flexGrow: 1, justifyContent: 'center', padding: spacing.lg },
@@ -370,38 +413,51 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 320,
   },
-  primaryBtn: {
-    marginTop: spacing.sm,
-    backgroundColor: colors.accent,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderRadius: radii.pill,
-    minHeight: 48,
-    justifyContent: 'center',
-  },
-  primaryBtnText: {
-    color: colors.accentText,
-    fontWeight: '600',
-    fontSize: type.body,
-  },
   sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.sm,
+    paddingBottom: 4,
     backgroundColor: colors.bg,
   },
   sectionTitle: {
-    color: colors.muted,
-    fontSize: type.section,
+    flex: 1,
+    color: colors.text,
+    fontSize: type.body,
     fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
   },
-  sectionMeta: {
-    color: colors.muted,
-    fontSize: 12,
-    marginTop: 2,
+  sectionMeta: { color: colors.muted, fontSize: 12, marginLeft: spacing.sm },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 48,
+    marginHorizontal: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 8,
+    borderRadius: radii.sm,
   },
+  rowActive: { backgroundColor: colors.surfaceMuted },
+  rowPressed: { backgroundColor: colors.border },
+  mark: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: spacing.sm,
+    backgroundColor: colors.border,
+  },
+  markWorking: { backgroundColor: colors.accent },
+  markWarn: { backgroundColor: colors.warn },
+  markError: { backgroundColor: colors.danger },
+  markUnread: { backgroundColor: colors.accent },
+  rowBody: { flex: 1, minWidth: 0 },
+  rowTitle: { color: colors.text, fontSize: type.body },
+  rowTitleUnread: { fontWeight: '600' },
+  rowMeta: { color: colors.muted, fontSize: 12, marginTop: 2 },
+  rowMetaWarn: { color: colors.warn, fontWeight: '600' },
+  rowMetaError: { color: colors.danger },
+  age: { color: colors.muted, fontSize: type.meta, marginLeft: spacing.sm },
   fab: {
     position: 'absolute',
     right: spacing.md,

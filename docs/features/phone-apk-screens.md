@@ -9,6 +9,8 @@ Screen-by-screen specification for the **Android APK** companion. The app remote
 
 Related: [remote-sessions.md](./remote-sessions.md) · [new-session-composer.md](./new-session-composer.md) · [architecture](../architecture/mobile-cursor-companion.md)
 
+**Amendment F (2026-10-01):** away-from-PC comfort — see UI-SPEC § Amendment F and [comfort gap audit](../reports/mobile-ux-comfort-gap-audit-2026-10-01.md).
+
 **UI design contract (plan locked 2026-10-01):** [`.planning/phases/05-mobile-ux-contract/05-UI-SPEC.md`](../../.planning/phases/05-mobile-ux-contract/05-UI-SPEC.md) — all screens + Pair QR + Settings PC/Refresh + sync parity + build best practices. Prefer that file for visual/IA locks; keep this feature doc for screen behavior.
 
 ## Implemented vs planned (shell)
@@ -25,6 +27,7 @@ Related: [remote-sessions.md](./remote-sessions.md) · [new-session-composer.md]
 | Model list from Hub (`GET /workspace/models` / `model_select` VERIFIED scrape) | **Implemented** data path — Cursor-like panel chrome **Designed** |
 | Dark OLED alternate (ui-ux-pro-max) | **Deferred** — light calm locked by sidebar reference |
 | Getting Started / Connect Slack footers | **Non-goal** (explicitly excluded) |
+| **Away-from-PC comfort (UI-SPEC Amendment F)** — local notifications (no FCM), per-chat status + Chats badge, approval card v2 with Deny undo, Changes card + read-only Diff screen, app lock, drafts/send retry | **Planned** — depends on Hub wave 1 (transcript stream, real approval detection, session status, Stop: **Gap/Designed**) |
 | Intentional motion (pair success, repo expand, selected row, approval appear, send, reconnect, `+` sheet) | **Planned** in UI-SPEC |
 
 ## Navigation map
@@ -189,6 +192,12 @@ flowchart TB
 4. **Advanced** — Health details, Browse PC files, Re-pair / Clear pairing, optional pending-approvals note.
 
 **Non-goals:** Cloud sync, public CDP, editing Cursor desktop General toggles from the phone.
+
+### 8a. App update (Account → Update, modal)
+
+Account shows **Update ready · x.y.z** when the PC Hub offers a newer build; the Update modal lists
+the checks it passed and what's new, then downloads over Tailscale, verifies size + md5 and opens
+Android's installer. Spec: [release-gate-and-self-update.md](release-gate-and-self-update.md).
 
 ## 9. Editor (optional) — Phase 3 · FR-070
 

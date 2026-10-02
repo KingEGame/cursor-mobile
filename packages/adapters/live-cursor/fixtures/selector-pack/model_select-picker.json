@@ -1,0 +1,13 @@
+{
+  "id": "model_select-picker",
+  "action": "model_select",
+  "recordedAgainst": "synthetic-fixture (not live Cursor)",
+  "recordedAt": "2026-09-25T00:00:00.000Z",
+  "domSnippet": "<div class=\"composer-bar\"><button type=\"button\" class=\"ui-model-picker__trigger\" aria-label=\"Model\">composer-1</button><div class=\"composer-unified-dropdown-model\" hidden></div></div>",
+  "expectedStrategyHits": [
+    ".ui-model-picker__trigger",
+    ".composer-unified-dropdown-model",
+    "button[aria-label*='Model']"
+  ],
+  "notes": "Synthetic model picker trigger."
+}

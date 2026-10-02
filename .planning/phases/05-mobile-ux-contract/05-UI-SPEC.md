@@ -4,7 +4,7 @@ slug: "mobile-ux-contract"
 status: plan_locked
 reviewed_at: "2026-10-01T19:45:00Z"
 amended_at: "2026-10-01"
-amendment: "A–E locked; open questions resolved with defaults; build best practices; ready for user approve→build"
+amendment: "A–F locked; F = away-from-PC comfort (notifications, status, approvals v2, changes, app lock, Hub prerequisites); ready for user approve→build"
 shadcn_initialized: false
 preset: none
 created: "2026-10-01"
@@ -21,7 +21,8 @@ product_locks: "PC-local Hub · open-project remote · Tailscale+pair · CDP 127
 > **Amendment B (2026-10-01):** Opened chat / Live chat → **Cursor chat chrome** (message stream + circular `+` sheet + mode chip + Working/Queued + Model panel).  
 > **Amendment C (2026-10-01):** Account → **Cursor Settings–format** screen focused on **connect phone ↔ Cursor PC**, **choose one PC**, and **Refresh now** (pull workspace + chat sessions from that Hub).  
 > **Amendment D (2026-10-01):** Pair → **primary path = PC shows QR, phone scans with camera** (`cursor-companion://pair` from Hub `qrPayload`). Manual code entry is fallback.  
-> **Amendment E (2026-10-01):** **Connectivity + session parity** — phone Home must show the same PC-bound Composer sessions as Cursor on that computer; Sync / Refresh now / focus / WS keep the list honest. Checker must re-verify — see `05-UI-REVIEW.md`.
+> **Amendment E (2026-10-01):** **Connectivity + session parity** — phone Home must show the same PC-bound Composer sessions as Cursor on that computer; Sync / Refresh now / focus / WS keep the list honest. Checker must re-verify — see `05-UI-REVIEW.md`.  
+> **Amendment F (2026-10-01):** **Away-from-PC comfort** — Hub prerequisites (live transcript stream, real approval detection, Stop), local notifications (no FCM), per-chat status + approvals badge, approval card v2, Changes card + read-only diff, app lock, PC reachability, drafts/send retry. Source: [`mobile-ux-comfort-gap-audit-2026-10-01.md`](../../../docs/reports/mobile-ux-comfort-gap-audit-2026-10-01.md). Checker must re-verify.
 
 ---
 
@@ -197,6 +198,20 @@ Home specifics: section headers (“Projects”, “Repositories”) use **Label
 | Destructive (clear pairing) | **Clear pairing:** Remove this phone’s trust with the PC Hub? You will need a new pair code. |
 | Destructive (Deny tool) | **Deny tool** (no second dialog — irreversible for that approval id; label alone is enough) |
 | Approval Approve | **Approve tool** |
+| Deny undo snackbar (F) | **Tool denied** · action **Undo** (3 s, then sent to Hub) |
+| Approval card meta (F) | **Runs in** {cwd} · **Tool** {name} |
+| Home waiting pill (F) | **{N} waiting for approval** → |
+| Row status a11y (F) | **Working** · **Waiting for approval** · **Finished** · **Failed** |
+| Changes card (F) | **{N} files changed** · action **View changes** |
+| Changes empty (F) | **No file changes in this turn** |
+| Notification — approval (F) | Title: **Approval needed · {project}** · Body: {tool}: {command preview} |
+| Notification — finished (F) | Title: **Agent finished · {chat title}** · Body: Tap to read the reply. |
+| Notification — failed (F) | Title: **Agent stopped with an error · {chat title}** |
+| Ongoing notification (F) | **Agent working · {project}** (low priority, silent) |
+| Send failed (F) | **Not sent** · action **Retry** |
+| App lock prompt (F) | **Unlock to approve tools on your PC** |
+| Offline — open Tailscale (F) | CTA **Open Tailscale** |
+| Stop confirm (F) | none — Stop is one tap; transcript shows **Stopped from phone** |
 
 Full connection strings live in `apps/mobile/src/hub/connection-state.ts` (`connectionStateLabel`) — keep UI-SPEC and code aligned.
 
@@ -763,6 +778,128 @@ flowchart LR
 
 ---
 
+## Amendment F — Away-from-PC comfort
+
+> **Why:** The phone is picked up to answer one question: *is my agent done, stuck, or waiting for me?* A–E define look and navigation; F defines what makes that answer reachable without opening the PC. Source audit: [`mobile-ux-comfort-gap-audit-2026-10-01.md`](../../../docs/reports/mobile-ux-comfort-gap-audit-2026-10-01.md).  
+> **Locks:** All logic on the PC Hub or on the phone. **No FCM / cloud push**, no VPS relay, CDP stays `127.0.0.1`, no tools on the phone.
+
+```mermaid
+flowchart LR
+  Cursor["Cursor Composer on PC"] -->|"CDP 127.0.0.1"| Adapter["LiveCursorAdapter"]
+  Adapter -->|"message delta · approval card · status · stop"| Hub["Hub on PC"]
+  Hub -->|"WS over Tailscale"| FG["Phone foreground service"]
+  FG --> Notif["Local notifications"]
+  FG --> UI["Home status · Chats badge · Live chat"]
+```
+
+### F1 — Hub / adapter prerequisites (build wave 1, before screen rebuild)
+
+| # | Capability | Hub / adapter contract (designed) | Screens that depend on it | Status |
+|---|------------|-----------------------------------|---------------------------|--------|
+| F1.1 | **Live transcript stream** | Adapter scrapes Composer message DOM → WS `session.message.appended` / `session.message.delta`; REST `GET /sessions/:id/messages` snapshot populated | Opened chat, notifications (finished) | **Gap** — not VERIFIED |
+| F1.2 | **Real approval detection** | Adapter watches Composer tool-approval card → auto `session.approval.requested` with `{tool, command, cwd}`; resolved on PC click too (`approval.resolved` source=`pc`) | Approval card v2, badge, notifications | **Gap** — today only dev/loopback enqueue |
+| F1.3 | **Agent status per session** | `session.updated.status ∈ working \| waiting_approval \| finished \| error \| idle` | Home row status, Working strip, notifications | **Gap** |
+| F1.4 | **Stop** | Selector pack `stop` + `POST /sessions/:id/stop` | Composer Send→Stop | **Designed** |
+| F1.5 | **Turn changes** | `GET /sessions/:id/changes` → `[{path, added, removed}]` (from Composer changes UI or workspace git diff under bound roots); file diff via `GET /workspace/file` + diff | Changes card, Diff screen | **Designed** |
+
+Rule: until a capability is VERIFIED, its UI shows fail-closed copy (e.g. no status mark rather than a guessed one).
+
+### F2 — Notifications (local, no cloud)
+
+| Aspect | Contract |
+|--------|----------|
+| Transport | Android **foreground service** keeps Hub WS open over Tailscale **only while** any bound session is `working` or `waiting_approval`; stops when all idle |
+| Ongoing | Low-priority silent notification **Agent working · {project}** (required by Android for the service) |
+| Channels | **Approvals** (high, sound + vibrate) · **Finished / failed** (default) · **Working** (low, silent) — user can tune per channel in Android settings |
+| Tap | Deep link `cursor-companion://live/:sessionId` (approval scrolls to card) |
+| Approve from notification | **Not in v1** — always open the card (full command visible; app lock applies) |
+| When app is open on that chat | Suppress the banner; show in-chat only |
+| Settings | Account → **Notifications** card: toggles for Approvals / Finished / Failed; "Keep connection while agents work" (on by default) |
+| Optional alt | Self-hosted ntfy **on the PC** — Deferred; never a third-party relay |
+
+### F3 — Home: per-chat status + approvals badge
+
+| Element | Contract |
+|---------|----------|
+| `SessionRow` status mark | Leading 8px mark replacing the plain dot: **working** = accent pulse (static if reduce-motion) · **waiting_approval** = warn `!` · **finished (unread)** = accent filled dot · **error** = destructive `✕` · idle/history = muted dot |
+| Sort | `waiting_approval` rows float to top of their repo group; otherwise recency |
+| Waiting pill | Slim pill under Search: **{N} waiting for approval →**; 1 → opens that chat; >1 → filters Home to waiting chats |
+| Chats tab badge | Count of pending approvals (warn color); hidden at 0. Still **two tabs** — no Approvals tab |
+| Unread | Finished turns not yet opened on phone show bold title until opened |
+
+### F4 — Approval card v2 (Opened chat)
+
+| Element | Contract |
+|---------|----------|
+| Header | Tool name + session title |
+| Command | Full command in monospace, horizontally scrollable, max 6 lines then expand |
+| Meta | **Runs in** {cwd} (path pill) |
+| Approve | One tap **Approve tool** (accent). If app lock "Require unlock to approve" is on → biometric first |
+| Deny | One tap **Deny tool** → snackbar **Tool denied · Undo** for 3 s → then POST to Hub. Replaces any confirm dialog |
+| Resolved on PC | Card collapses to "Approved on PC" / "Denied on PC" (from `approval.resolved` source) |
+| Stale | If Hub reports approval gone → "No longer pending" |
+
+### F5 — Changes card + read-only Diff screen
+
+| Element | Contract |
+|---------|----------|
+| Changes card | After an agent turn with edits: **{N} files changed** + up to 3 rows `path +a −r` + **View changes** |
+| Diff screen (new route `Diff`) | List of changed files → tap → unified read-only diff, monospace, line wrap toggle; deep link `cursor-companion://diff/:sessionId` |
+| Keep / Undo all | **Hidden** unless selectors VERIFIED; phone never edits files directly |
+| Empty | **No file changes in this turn** |
+
+### F6 — App lock (phone-only)
+
+| Setting (Account → **Security** card) | Default |
+|---------------------------------------|---------|
+| Require unlock to approve tools | **On** when device has biometrics/PIN |
+| Lock app when opened | Off |
+| Re-lock after | 5 min in background |
+
+Uses on-device biometric/PIN API only; no account, no cloud.
+
+### F7 — PC reachability
+
+| Side | Contract |
+|------|----------|
+| PC | Hub ships a **user service** recipe (autostart at login) and **inhibits sleep while any session is `working`** (released when idle). Never wakes the PC remotely (no WoL relay in v1) |
+| Phone | Offline state names the layer: **Tailscale off on phone** (CTA **Open Tailscale**) · **PC unreachable** (asleep/offline) · **Hub not running** · **Cursor not open** — reuse Copywriting error strings |
+
+### F8 — Drafts and send retry
+
+| Element | Contract |
+|---------|----------|
+| Draft | Per-chat draft persisted on device; restored on reopen |
+| Outgoing | Optimistic bubble with **Sending…**; failure → **Not sent · Retry**; never silently dropped |
+| Queued strip | Covers both "agent busy" follow-ups and offline sends |
+
+### F9 — Polish (P2, designed now so they fit later)
+
+| Item | Contract |
+|------|----------|
+| Quick replies | Up to 3 chips above composer after an agent turn: **Continue** · **Run the tests** · **Explain** (static v1; editable later) |
+| Code blocks | Monospace, horizontal scroll, **Copy** button per block |
+| Share into chat | Android share target "Send to Cursor chat" (text/URL) → New chat or pick existing |
+| Haptics | Light on Approve/Deny, Send, pair success |
+| Dark theme | Still Deferred — re-evaluate after research (night use) |
+
+### F — Implemented vs planned
+
+| Piece | Status |
+|-------|--------|
+| F1.1–F1.3 stream / approval detect / status | **Gap** (Hub + adapter) |
+| F1.4 Stop, F1.5 changes | **Designed** |
+| F2 notifications + foreground service | **Planned** (spike battery on Pixel 7 first) |
+| F3 row status, badge, waiting pill | **Planned** (needs F1.3) |
+| F4 approval card v2 | **Planned** (needs F1.2 for real data) |
+| F5 Changes + Diff screen | **Planned** (needs F1.5) |
+| F6 app lock | **Planned** |
+| F7 Hub autostart + sleep inhibit | **Planned** |
+| F8 drafts / retry | **Planned** |
+| F9 polish | **Designed** (P2) |
+
+---
+
 ## Screen Inventory
 
 | Screen | Route | Purpose | Primary content | Entry points | Status |
@@ -775,6 +912,7 @@ flowchart LR
 | Live chat | `LiveChat` | Continue live Composer — Cursor chat chrome | Transcript (bubbles/identity/pills), ApprovalCards, composer `+`/mode/Model/Send·Stop | Session row (live); after Create; deep link `live/:id` | **Implemented (shell) — chrome amend pending** |
 | History read | `HistoryRead` | Read-only past session + Open on PC | Transcript snippet; Open on PC | Session row (history) | **Implemented** |
 | New chat | `NewSession` (modal) | Create session in PC-open project | Bound project, model, mode, attachments, Create | Home **New Chat**; deep link `new` | **Implemented** |
+| Diff (F) | `Diff` | Read-only turn changes | Changed files → unified diff | Changes card; notification; deep link `diff/:id` | **Planned** |
 | Editor browse | `Editor` | Optional browse/preview of PC workspace files | File list / preview under roots | Account → Browse PC files | **Implemented (Phase 3 optional)** |
 | Home (alias) | `Home` | Deprecated alias → Main | — | Older deep links / UAT | **Implemented (shim)** |
 
@@ -960,6 +1098,7 @@ See **Screen — Opened chat** interaction model. Phone is remote UI; Hub + Live
 | Editor | Browse/preview | Keep optional; not primary path |
 | Motion | Mostly none | Intentional micro-interactions (below) |
 | Dark mode | Not shipped | Deferred alternate |
+| **Away-from-PC (F)** | — | Hub stream/approval/status/stop prerequisites; local notifications; row status + badge; approval v2; Changes/Diff; app lock; drafts; PC reachability |
 
 ---
 
@@ -978,6 +1117,9 @@ See **Screen — Opened chat** interaction model. Phone is remote UI; Hub + Live
 - Public Hub (ngrok/Funnel) as product path
 - Hosting Hub UI or sync on VPS/cloud
 - New Folder creation from phone Repositories header
+- **FCM / any cloud push relay** for notifications (F2 uses a local foreground service)
+- Approving tools directly from a notification without opening the card (v1)
+- Phone-side file edits or Keep/Undo before selectors are VERIFIED
 
 ---
 
@@ -1040,6 +1182,12 @@ Open questions closed with product defaults (change only if you disagree before 
 | 9 | **Omit** message thumbs + in-chat Search in v1 (Search stays on Home) |
 | 10 | Show **Plan** in `+` sheet; wire when adapter confirms |
 | 11 | Computer list = **paired Hubs only**; add via Pair / Scan QR |
+| 12 | **(F)** Hub stream + approval detection + status + Stop are **wave 1 prerequisites** before screen rebuild |
+| 13 | **(F)** Notifications = local foreground service while agents work; **no FCM** |
+| 14 | **(F)** Approvals stay in chat; add **Chats tab badge** + Home waiting pill (still two tabs) |
+| 15 | **(F)** Deny uses **3 s Undo snackbar**, not a confirm dialog |
+| 16 | **(F)** App lock: require unlock to approve **on** by default; lock on open **off** |
+| 17 | **(F)** Changes are **read-only** on phone until Keep/Undo selectors VERIFIED |
 
 ---
 
@@ -1071,6 +1219,7 @@ flowchart TB
 | 9 | **Editor** | Optional file browse | P2 optional |
 
 **Sync (cross-cutting):** Home focus + pull + WS + Settings Refresh now → same PC session list.  
+**Away-from-PC (cross-cutting, F):** notifications + row status + badge + approval v2 + Changes/Diff + app lock; build order Hub wave 1 → screens.  
 **Non-goals:** cloud agents, phone CDP, Getting Started/Slack, full phone IDE, tools-on-phone.
 
 ---
@@ -1146,7 +1295,7 @@ Applicable state considerations resolved: 18 covered, 2 backstop, 0 unresolved
 - [ ] Dimension 6 Registry Safety: PASS
 - [ ] Dimension 7 Inventory Provenance: PASS (N/A shadcn — Tool: none; RN modules enumerated below)
 
-**Approval:** draft after home + opened-chat amendments (2026-10-01) — prior approval in `05-UI-REVIEW.md`; requires checker re-run
+**Approval:** draft after home + opened-chat amendments + **Amendment F** (2026-10-01) — prior approval in `05-UI-REVIEW.md`; requires checker re-run
 
 **Enumerated UI modules (provenance for plan, not a shadcn inventory):**  
 `node` walk of `apps/mobile/src/{components,screens}` — **18 UI modules** — `@cursor-mobile/mobile@0.1.0` — 2026-10-01.  
