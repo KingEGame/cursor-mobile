@@ -22,7 +22,7 @@ import {
   validateAttachmentPaths,
 } from "../workspace/files.js";
 import { buildToolsSummary } from "../workspace/tools.js";
-import { buildAgentsResponse } from "../agents.js";
+import { agentComposerId, buildAgentsResponse } from "../agents.js";
 import type { SessionCreateInput } from "../session-create-queue.js";
 import { lookupLatestRelease } from "../app-release.js";
 
@@ -1658,6 +1658,45 @@ export function createApiRouter(ctx: HubContext): Router {
     asyncRoute(async (_req, res) => {
       const sidebar = await ctx.live.scrapeSidebar();
       res.status(200).json(buildAgentsResponse(sidebar, ctx.agentsIndex));
+    }),
+  );
+
+  // Read-only: files this chat changed (original → current disk) and one file's diff.
+  router.get(
+    "/agents/chats/:composerId/changes",
+    requirePaired(ctx),
+    asyncRoute(async (req, res) => {
+      const composerId = agentComposerId(req.params.composerId);
+      const files = ctx.agentsIndex.changes(composerId);
+      if (!files) throw new ApiError(404, "SESSION_NOT_FOUND", "Unknown chat");
+      res.status(200).json({ composerId, files });
+    }),
+  );
+
+  router.get(
+    "/agents/chats/:composerId/changes/:index",
+    requirePaired(ctx),
+    asyncRoute(async (req, res) => {
+      const composerId = agentComposerId(req.params.composerId);
+      const index = Number.parseInt(pathParam(req.params.index), 10);
+      const diff = Number.isInteger(index) && index >= 0 ? ctx.agentsIndex.fileDiff(composerId, index) : null;
+      if (!diff) throw new ApiError(404, "FILE_NOT_FOUND", "No such changed file for this chat");
+      res.status(200).json(diff);
+    }),
+  );
+
+  router.post(
+    "/agents/chats/:composerId/stop",
+    requirePaired(ctx),
+    asyncRoute(async (req, res) => {
+      const composerId = agentComposerId(req.params.composerId);
+      const result = await ctx.live.stopAgentChat(composerId);
+      if (!result.ok) {
+        const status =
+          result.code === "CHAT_NOT_IN_SIDEBAR" ? 404 : result.code === "NOT_RUNNING" ? 409 : result.code === "CHAT_SWITCH_FAILED" ? 409 : 503;
+        throw new ApiError(status, result.code, result.error);
+      }
+      res.status(202).json({ ok: true, composerId, switchedOnPc: result.switched });
     }),
   );
 

@@ -19,8 +19,9 @@ import {
 import { createHubServer } from "../src/server.js";
 import { readWorkspaceFilePreview } from "../src/workspace/files.js";
 import { parseModelsEnv } from "../src/workspace/models.js";
+import { REPO_ROOT } from "./repo-root.js";
 
-const WORKSPACE = "/data/projects/cursor_mobile";
+const WORKSPACE = REPO_ROOT;
 const tempDirs: string[] = [];
 
 afterEach(() => {

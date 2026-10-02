@@ -320,4 +320,7 @@ export interface LiveCursorAdapter {
    * type + submit `text`. Requires send_message VERIFIED; never types into another chat.
    */
   sendToAgentChat(composerId: string, text: string): Promise<ChatSendResult>;
+
+  /** Open `composerId` on the PC and click Stop generation; NOT_RUNNING when idle. */
+  stopAgentChat(composerId: string): Promise<ChatSendResult>;
 }

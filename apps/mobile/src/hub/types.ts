@@ -520,3 +520,19 @@ export interface AgentsResponse {
   scannedAt: string;
   projects: AgentsProjectRow[];
 }
+
+/** GET /v1/agents/chats/:id/changes */
+export interface ChatFileChange {
+  index: number;
+  path: string;
+  isNew: boolean;
+  deleted: boolean;
+  added: number;
+  removed: number;
+  skipped: string | null;
+}
+
+/** GET /v1/agents/chats/:id/changes/:index */
+export interface ChatFileDiff extends ChatFileChange {
+  hunks: Array<{ oldStart: number; newStart: number; lines: string[] }>;
+}

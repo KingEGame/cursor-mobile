@@ -1,4 +1,8 @@
-import { sendToAgentChat as sendAgentChatMessage, type ChatSendResult } from "./chat-send.js";
+import {
+  sendToAgentChat as sendAgentChatMessage,
+  stopAgentChat as stopAgentChatRun,
+  type ChatSendResult,
+} from "./chat-send.js";
 import {
   scrapeAgentsSidebar,
   type SidebarScrapeResult,
@@ -933,6 +937,33 @@ export class LiveCursorAdapterImpl implements LiveCursorAdapter {
     }
   }
 
+  async stopAgentChat(composerId: string): Promise<ChatSendResult> {
+    const health = await this.getHealth();
+    if (health.state === "cursor_down") {
+      return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor CDP unreachable", methods: [] };
+    }
+    const debuggerUrl = this.resolveDebuggerUrl();
+    if (!debuggerUrl) {
+      return { ok: false, code: "CDP_INPUT_FAILED", error: "No loopback CDP debugger URL", methods: [] };
+    }
+    let client;
+    try {
+      client = await this.cdpClientFactory(debuggerUrl);
+    } catch (err) {
+      return {
+        ok: false,
+        code: "CDP_INPUT_FAILED",
+        error: err instanceof Error ? err.message : "Failed to open CDP session",
+        methods: [],
+      };
+    }
+    try {
+      return await stopAgentChatRun(client, composerId);
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
   async scrapeSidebar(): Promise<SidebarScrapeResult> {
     const health = await this.getHealth();
     if (health.state === "cursor_down") {
@@ -1521,6 +1552,21 @@ export function createMockLiveCursorAdapter(
       }
       sentToAgentChats.push({ composerId, text });
       return { ok: true, switched: true, methods: ["Runtime.evaluate", "Input.insertText"] };
+    },
+    async stopAgentChat(composerId) {
+      if (healthState !== "cdp_ok") {
+        return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor down", methods: [] };
+      }
+      const chat = (overrides.sidebarSections ?? [])
+        .flatMap((sec) => sec.chats)
+        .find((c) => c.composerId === composerId);
+      if (!chat) {
+        return { ok: false, code: "CHAT_NOT_IN_SIDEBAR", error: "Chat is not in the PC Agents sidebar", methods: [] };
+      }
+      if (chat.live !== "working") {
+        return { ok: false, code: "NOT_RUNNING", error: "This chat is not running on the PC", methods: [] };
+      }
+      return { ok: true, switched: true, methods: ["Input.dispatchMouseEvent"] };
     },
     async scrapeSidebar() {
       if (healthState !== "cdp_ok") {

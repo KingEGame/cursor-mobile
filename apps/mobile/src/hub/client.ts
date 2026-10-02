@@ -29,6 +29,8 @@ import {
   type WorkspaceResponse,
   type WorkspaceToolsResponse,
   type AgentsResponse,
+  type ChatFileChange,
+  type ChatFileDiff,
   isQueuedCreateSession,
 } from './types';
 
@@ -291,6 +293,26 @@ export class HubClient {
     return this.request('POST', `/v1/agents/chats/${encodeURIComponent(composerId)}/messages`, {
       auth: true,
       body: { text },
+    });
+  }
+
+  /** POST /v1/agents/chats/:id/stop — click Stop generation for that chat on the PC. */
+  async stopAgentChat(composerId: string): Promise<{ ok: true }> {
+    return this.request('POST', `/v1/agents/chats/${encodeURIComponent(composerId)}/stop`, {
+      auth: true,
+      body: {},
+    });
+  }
+
+  /** GET /v1/agents/chats/:id/changes — files this chat changed (read-only). */
+  async listChatChanges(composerId: string): Promise<{ composerId: string; files: ChatFileChange[] }> {
+    return this.request('GET', `/v1/agents/chats/${encodeURIComponent(composerId)}/changes`, { auth: true });
+  }
+
+  /** GET /v1/agents/chats/:id/changes/:index — one file's diff (original → current). */
+  async getChatFileDiff(composerId: string, index: number): Promise<ChatFileDiff> {
+    return this.request('GET', `/v1/agents/chats/${encodeURIComponent(composerId)}/changes/${index}`, {
+      auth: true,
     });
   }
 

@@ -15,6 +15,9 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { MainTabsScreen } from './src/screens/MainTabsScreen';
 import { LiveChatScreen } from './src/screens/LiveChatScreen';
 import { HistoryReadScreen } from './src/screens/HistoryReadScreen';
+import { ChatChangesScreen } from './src/screens/ChatChangesScreen';
+import { LockGate } from './src/components/LockGate';
+import { syncPcWatch } from './src/notifications/pc-watch';
 import { NewSessionScreen } from './src/screens/NewSessionScreen';
 import { EditorScreen } from './src/screens/EditorScreen';
 import { UpdateScreen } from './src/screens/UpdateScreen';
@@ -250,6 +253,11 @@ function RootNavigator() {
         options={{ title: 'Chat' }}
       />
       <Stack.Screen
+        name="ChatChanges"
+        component={ChatChangesScreen}
+        options={{ title: 'Changes' }}
+      />
+      <Stack.Screen
         name="NewSession"
         component={NewSessionScreen}
         options={{ title: 'New chat', presentation: 'modal' }}
@@ -274,6 +282,16 @@ function AppNavigation() {
   const [initialState, setInitialState] = useState<InitialState | undefined>();
   /** Bump to remount NavigationContainer when a late VIEW intent injects a token. */
   const [navEpoch, setNavEpoch] = useState(0);
+
+  // Keep the background agent watcher in step with the current pairing (Account → Notifications).
+  useEffect(() => {
+    if (!session.bootstrapped) return;
+    void syncPcWatch({
+      hubBaseUrl: session.hubBaseUrl,
+      deviceToken: session.deviceToken,
+      hubName: session.hubDisplayName,
+    });
+  }, [session.bootstrapped, session.hubBaseUrl, session.deviceToken, session.hubDisplayName]);
 
   useEffect(() => {
     if (!session.bootstrapped) return;
@@ -332,7 +350,9 @@ function AppNavigation() {
       initialState={initialState}
     >
       <StatusBar style="dark" />
-      <RootNavigator />
+      <LockGate>
+        <RootNavigator />
+      </LockGate>
     </NavigationContainer>
   );
 }

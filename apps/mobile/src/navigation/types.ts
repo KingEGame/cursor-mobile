@@ -31,6 +31,8 @@ export type RootStackParamList = {
   Home: undefined;
   LiveChat: { sessionId: string; title?: string; prefill?: string; autosend?: boolean };
   HistoryRead: { sessionId: string; title?: string };
+  /** Files an Agents chat changed; `index` set → that file's diff. */
+  ChatChanges: { composerId: string; title?: string; index?: number; path?: string };
   /**
    * Optional deep-link inject — `cursor-companion://new?prompt=&model=&attach=&auto=`
    * Adb UAT must set prompt/model/attach in React state (RN TextInput ignores adb).

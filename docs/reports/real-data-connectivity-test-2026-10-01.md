@@ -139,6 +139,20 @@ Still open: Cursor subagent notices (`<system_notification>…<user_query>`) sho
 | False "waiting for approval" | `hasBlockingPendingActions` is stale on finished chats (4/4 flagged chats were `completed`) → only trusted while the run is not completed |
 | Approvals | **Not testable yet**: asked the agent to run `echo phone-approval-test`; Cursor ran it via a sub-task **without** an approval prompt → operator's Cursor auto-runs terminal commands. **Deferred by operator decision (2026-10-01): keep Cursor auto-run on** — no approval cards occur, so phone approvals are parked. Revisit only if auto-run is turned off; the waiting badge stays (and now ignores stale flags) |
 
+### Away-from-PC items (2026-10-01, evening)
+
+| # | Item | Result |
+|---|------|--------|
+| 1 | Hub runs by itself | systemd **user** service `cursor-mobile-hub` (`npm run hub:service:install`): starts at login, restarts on crash (killed → back in ~7 s); QR advertises Tailscale IPv4 |
+| 2 | Cursor always CDP-ready | operator's own launcher `~/.local/share/applications/cursor.desktop` now adds `--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1` (GPU flags kept; backup `cursor.desktop.bak-before-cdp`). **Verified** after a full Cursor quit/reopen: `--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1`, Hub `cdp_ok` |
+| 3 | Stop | `POST /v1/agents/chats/:id/stop` → open chat (verified switch) → click `[aria-label="Stop generation"]`; `NOT_RUNNING` (409, nothing clicked) when idle. Phone: "Agent working on your PC…" strip + **Stop**. **Verified on Pixel**: run halted mid-output |
+| 4 | Changed files | `GET /v1/agents/chats/:id/changes[/:index]` — Cursor's `originalFileStates` (pre-edit content) vs file on disk, jsdiff; phone bar "N files changed · View changes" + read-only diff screen. Verified on Pixel (6 files, +958 −196) |
+| 5 | App lock | `expo-local-authentication`: unlock before Send (default on), optional lock on open (5 min); turning a lock off needs unlock. Verified system prompt + cancel keeps lock on |
+| 6 | Notifications | local Expo module `apps/mobile/modules/pc-watch` (Kotlin foreground service, `specialUse`): polls `GET /v1/agents` every 20 s over Tailscale, notifies on finished / failed / approval; token kept in the start Intent only. Poll 10 s. **Verified**: app in background → "Agent finished · Project current state" 25 s after start |
+| — | Live status | Cursor's DB reads `aborted` for the whole run and settles only at the end → live state now comes from the sidebar row icon (`ui-dot-grid-loader` = working; labelled dot otherwise) |
+| — | Auto-start after reboot | `loginctl enable-linger` → Hub service starts at **boot**; `~/.config/autostart/cursor-mobile-cursor.desktop` starts Cursor at **login** with loopback CDP (copy in `scripts/systemd/cursor-autostart.desktop`). Phone watcher restarts when the app is opened after a **phone** reboot |
+| 7 | Self-update review | design OK (phone downloads only from the PC Hub, md5 + size checked). Gate GREEN (329 tests). Fixed `verify-apk.mjs`: build-tools 36 aapt2 prints `usesCleartextTraffic=true`, the guard only accepted the old `(type 0x12)0xffffffff` form and refused good builds |
+
 ---
 
 ## 5. Recommendation

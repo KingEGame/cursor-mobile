@@ -20,7 +20,7 @@ export type ChatSendResult =
   | { ok: true; switched: boolean; methods: string[] }
   | {
       ok: false;
-      code: "CHAT_NOT_IN_SIDEBAR" | "CHAT_SWITCH_FAILED" | "CDP_INPUT_FAILED";
+      code: "CHAT_NOT_IN_SIDEBAR" | "CHAT_SWITCH_FAILED" | "CDP_INPUT_FAILED" | "NOT_RUNNING";
       error: string;
       methods: string[];
     };
@@ -151,4 +151,37 @@ export async function sendToAgentChat(
     return { ok: false, code: "CDP_INPUT_FAILED", error: typed.error, methods };
   }
   return { ok: true, switched: opened.switched, methods };
+}
+
+/** Cursor's composer stop control while an agent runs (Agents window, 2026-10). */
+export const STOP_GENERATION_SELECTORS = ['[aria-label="Stop generation"]'];
+
+/**
+ * Open the chat on the PC, then click its Stop button. `NOT_RUNNING` (nothing clicked)
+ * when the chat has no run in progress.
+ */
+export async function stopAgentChat(
+  client: CdpClient,
+  composerId: string,
+  opts: { wait?: Wait; switchTimeoutMs?: number } = {},
+): Promise<ChatSendResult> {
+  const opened = await openAgentChat(client, composerId, opts);
+  if (!opened.ok) return opened;
+  if (opened.switched) await (opts.wait ?? realWait)(250);
+  const methods = [...opened.methods];
+  try {
+    const hit = await resolveElementCenter(client, STOP_GENERATION_SELECTORS, methods);
+    if (!hit) {
+      return { ok: false, code: "NOT_RUNNING", error: "This chat is not running on the PC", methods };
+    }
+    await dispatchClick(client, hit.box.x, hit.box.y, methods);
+    return { ok: true, switched: opened.switched, methods };
+  } catch (err) {
+    return {
+      ok: false,
+      code: "CDP_INPUT_FAILED",
+      error: err instanceof Error ? err.message : String(err),
+      methods,
+    };
+  }
 }

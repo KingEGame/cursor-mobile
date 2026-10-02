@@ -6,6 +6,7 @@ import request from "supertest";
 import { createMockLiveCursorAdapter } from "@cursor-mobile/live-cursor";
 import { createApp } from "../../src/app.js";
 import { createHubContext, loadConfig } from "../../src/config.js";
+import { REPO_ROOT } from "../repo-root.js";
 
 function freshApp(cursorWorkspace: string | null = null) {
   const config = loadConfig({
@@ -42,7 +43,7 @@ async function pairDevice(app: ReturnType<typeof createApp>) {
 
 describe("phase0 / pair (FR-002)", () => {
   it("AC-002-01: valid pair code issues device token", async () => {
-    const { app } = freshApp("/data/projects/cursor_mobile");
+    const { app } = freshApp(REPO_ROOT);
     const paired = await pairDevice(app);
     expect(paired.deviceToken.length).toBeGreaterThan(16);
 
@@ -51,7 +52,7 @@ describe("phase0 / pair (FR-002)", () => {
       .set("authorization", `Bearer ${paired.deviceToken}`)
       .expect(200);
     expect(ws.body.workspaceId).toMatch(/^ws_/);
-    expect(ws.body.path).toBe("/data/projects/cursor_mobile");
+    expect(ws.body.path).toBe(REPO_ROOT);
   });
 
   it("AC-002-02: GET /workspace without pair → 401", async () => {
@@ -83,7 +84,7 @@ describe("phase0 / pair (FR-002)", () => {
   });
 
   it("AC-002-04: re-pair after revoke — new token works; old rejected", async () => {
-    const { app, ctx } = freshApp("/data/projects/cursor_mobile");
+    const { app, ctx } = freshApp(REPO_ROOT);
     const first = await pairDevice(app);
     expect(ctx.pairing.revokeByToken(first.deviceToken)).toBe(true);
 

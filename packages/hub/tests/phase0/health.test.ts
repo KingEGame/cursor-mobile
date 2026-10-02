@@ -9,6 +9,7 @@ import {
 } from "@cursor-mobile/live-cursor";
 import { createApp } from "../../src/app.js";
 import { createHubContext, loadConfig } from "../../src/config.js";
+import { REPO_ROOT } from "../repo-root.js";
 
 function testCtx(overrides?: {
   cursorWorkspace?: string | null;
@@ -38,7 +39,7 @@ describe("phase0 / health (FR-004)", () => {
   it("AC-004-01: Hub+CDP OK → health reports hub up + CDP connected", async () => {
     const ctx = testCtx({
       liveProbe: "connected",
-      cursorWorkspace: "/data/projects/cursor_mobile",
+      cursorWorkspace: REPO_ROOT,
     });
     const res = await request(createApp(ctx)).get("/health").expect(200);
     expect(res.body.ok).toBe(true);

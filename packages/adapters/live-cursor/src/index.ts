@@ -124,13 +124,21 @@ export type {
 export {
   parseSidebarSnapshot,
   scrapeAgentsSidebar,
+  sidebarLiveState,
   SIDEBAR_SCRAPE_EXPRESSION,
 } from "./sidebar-scrape.js";
 export type {
   SidebarChat,
+  SidebarLiveState,
   SidebarScrapeResult,
   SidebarSection,
 } from "./sidebar-scrape.js";
 
-export { openAgentChat, readOpenChatId, sendToAgentChat } from "./chat-send.js";
+export {
+  openAgentChat,
+  readOpenChatId,
+  sendToAgentChat,
+  STOP_GENERATION_SELECTORS,
+  stopAgentChat,
+} from "./chat-send.js";
 export type { ChatSendResult } from "./chat-send.js";

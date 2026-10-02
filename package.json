@@ -45,7 +45,8 @@
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "release:apk": "bash scripts/release-apk-local.sh",
     "publish:apk": "node scripts/publish-apk-to-hub.mjs",
-    "publish:apk:github": "node scripts/publish-apk-to-hub.mjs --from-github"
+    "publish:apk:github": "node scripts/publish-apk-to-hub.mjs --from-github",
+    "hub:service:install": "bash scripts/install-hub-service.sh"
   },
   "engines": {
     "node": ">=20"

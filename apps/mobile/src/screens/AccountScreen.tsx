@@ -1,3 +1,5 @@
+import { NotificationsCard } from '../components/NotificationsCard';
+import { SecurityCard } from '../components/SecurityCard';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Pressable,
@@ -163,6 +165,10 @@ export function AccountScreen({ navigation }: Props) {
         installedLabel={installedVersionLabel()}
         onOpen={() => navigation.navigate('Update')}
       />
+
+      <NotificationsCard />
+
+      <SecurityCard />
 
       {pendingApprovals > 0 ? (
         <View style={styles.card} testID="account-approvals-badge">

@@ -1,0 +1,7 @@
+expo.modules.pcwatch.pc-watch-pngs-0 /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/build/generated/res/pngs/release
+expo.modules.pcwatch.pc-watch-resValues-1 /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/build/generated/res/resValues/release
+expo.modules.pcwatch.pc-watch-mergeReleaseResources-2 /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/build/intermediates/incremental/release/mergeReleaseResources/merged.dir
+expo.modules.pcwatch.pc-watch-mergeReleaseResources-3 /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/build/intermediates/incremental/release/mergeReleaseResources/stripped.dir
+expo.modules.pcwatch.pc-watch-release-4 /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/build/intermediates/merged_res/release/mergeReleaseResources
+expo.modules.pcwatch.pc-watch-main-5 /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/res
+expo.modules.pcwatch.pc-watch-release-6 /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/release/res

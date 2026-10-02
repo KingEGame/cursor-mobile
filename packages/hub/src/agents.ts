@@ -9,22 +9,42 @@
 
 import {
   describeAgentChats,
+  getChatFileDiff,
+  listChatChanges,
   listRecentLocalProjects,
+  type ChatFileChange,
+  type ChatFileDiff,
   type AgentChatDetails,
   type AgentChatStatus,
   type AgentProjectGroup,
 } from "@cursor-mobile/history";
-import type { SidebarScrapeResult } from "@cursor-mobile/live-cursor";
+import type { SidebarLiveState, SidebarScrapeResult } from "@cursor-mobile/live-cursor";
+import { ApiError } from "./errors.js";
 
 export interface AgentsIndex {
   describe(composerIds: string[]): Map<string, AgentChatDetails>;
   recent(limit: number): AgentProjectGroup[];
+  changes(composerId: string): ChatFileChange[] | null;
+  fileDiff(composerId: string, index: number): ChatFileDiff | null;
 }
 
 export const defaultAgentsIndex: AgentsIndex = {
   describe: (ids) => describeAgentChats(ids),
   recent: (limit) => listRecentLocalProjects({ limit }),
+  changes: (id) => listChatChanges(id),
+  fileDiff: (id, index) => getChatFileDiff(id, index),
 };
+
+const COMPOSER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Validate a local Agents chat id from a URL param (rejects bc- cloud ids and junk). */
+export function agentComposerId(raw: unknown): string {
+  const id = typeof raw === "string" ? raw.trim() : "";
+  if (!COMPOSER_ID.test(id)) {
+    throw new ApiError(400, "VALIDATION_ERROR", "Not a local Cursor chat id");
+  }
+  return id.toLowerCase();
+}
 
 export interface AgentsChatRow {
   /** Hub session id; `GET /v1/sessions/:id` returns the transcript. */
@@ -58,6 +78,11 @@ export interface AgentsResponse {
   projects: AgentsProjectRow[];
 }
 
+function liveStatus(live: SidebarLiveState | undefined): AgentChatStatus | null {
+  if (live === undefined) return null;
+  return live === "working" || live === "waiting_approval" || live === "error" ? live : "idle";
+}
+
 export function buildAgentsResponse(
   sidebar: SidebarScrapeResult,
   index: AgentsIndex,
@@ -88,8 +113,10 @@ export function buildAgentsResponse(
             title: c.title || d?.title || `Chat ${c.composerId.slice(0, 8)}`,
             ageLabel: c.ageLabel || null,
             updatedAt: d?.updatedAt ?? null,
-            status: d?.status ?? "idle",
-            unread: d?.unread ?? false,
+            // Sidebar live state wins: Cursor's DB reads `aborted` for the whole run and only
+            // settles when the run ends.
+            status: liveStatus(c.live) ?? d?.status ?? "idle",
+            unread: c.live === "unread" || (d?.unread ?? false),
             linesAdded: d?.linesAdded ?? 0,
             linesRemoved: d?.linesRemoved ?? 0,
             activeOnPc: c.active,

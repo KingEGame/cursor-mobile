@@ -12,6 +12,8 @@ import {
   PairingStore,
   resolveWorkspace,
 } from "../../src/config.js";
+import { basename } from "node:path";
+import { REPO_ROOT } from "../repo-root.js";
 
 function appWithWorkspace(
   cursorWorkspace: string | null,
@@ -78,15 +80,15 @@ describe("phase0 / workspace empty-state (FR-012)", () => {
   });
 
   it("AC-010-01: bound workspace exposes name/path/roots", async () => {
-    const { app } = appWithWorkspace("/data/projects/cursor_mobile");
+    const { app } = appWithWorkspace(REPO_ROOT);
     const token = await pair(app);
     const res = await request(app)
       .get("/workspace")
       .set("Authorization", `Bearer ${token}`)
       .expect(200);
     expect(res.body.workspaceId).toMatch(/^ws_/);
-    expect(res.body.name).toBe("cursor_mobile");
-    expect(res.body.path).toBe("/data/projects/cursor_mobile");
+    expect(res.body.name).toBe(basename(REPO_ROOT));
+    expect(res.body.path).toBe(REPO_ROOT);
     expect(res.body.roots.length).toBeGreaterThan(0);
   });
 
@@ -103,7 +105,7 @@ describe("phase0 / workspace empty-state (FR-012)", () => {
   });
 
   it("AC-013-02 / AC-013-04: foreign workspaceId rejected", async () => {
-    const { app } = appWithWorkspace("/data/projects/cursor_mobile");
+    const { app } = appWithWorkspace(REPO_ROOT);
     const token = await pair(app);
     const res = await request(app)
       .post("/sessions")
@@ -115,7 +117,7 @@ describe("phase0 / workspace empty-state (FR-012)", () => {
 
   it("AC-013-01: bound workspaceId create succeeds (Hub register; DOM may be deferred)", async () => {
     const { app } = appWithWorkspace(
-      "/data/projects/cursor_mobile",
+      REPO_ROOT,
       "extractor_stale",
     );
     const token = await pair(app);

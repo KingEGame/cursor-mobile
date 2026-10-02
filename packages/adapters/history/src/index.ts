@@ -59,3 +59,6 @@ export type {
   AgentChatStatus,
   AgentProjectGroup,
 } from "./agents-index.js";
+
+export { diffFile, getChatFileDiff, listChatChanges } from "./chat-changes.js";
+export type { ChatFileChange, ChatFileDiff } from "./chat-changes.js";

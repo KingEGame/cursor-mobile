@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createMockCdpClient } from "./cdp-client.js";
-import { parseSidebarSnapshot, scrapeAgentsSidebar } from "./sidebar-scrape.js";
+import { parseSidebarSnapshot, scrapeAgentsSidebar, sidebarLiveState } from "./sidebar-scrape.js";
 
 const CHAT_A = "466762d6-04ca-46e6-a047-4ad7932ae829";
 const CHAT_B = "5197bfb7-05a0-460d-9c89-6b2b0fd2f4c9";
@@ -40,6 +40,7 @@ describe("parseSidebarSnapshot", () => {
       title: "Omnitouter and Laya project",
       ageLabel: "7d",
       active: false,
+      live: "idle",
     });
     expect(res.sections[1]!.hasMore).toBe(true);
   });
@@ -48,7 +49,7 @@ describe("parseSidebarSnapshot", () => {
     const res = parseSidebarSnapshot(snapshot);
     if (!res.ok) throw new Error(res.error);
     expect(res.sections[1]!.chats).toEqual([
-      { composerId: CHAT_B, title: "Local chat", ageLabel: "2d", active: true },
+      { composerId: CHAT_B, title: "Local chat", ageLabel: "2d", active: true, live: "idle" },
     ]);
   });
 
@@ -75,5 +76,28 @@ describe("scrapeAgentsSidebar", () => {
     });
     const res = await scrapeAgentsSidebar(client);
     expect(res).toEqual({ ok: false, error: "Sidebar scrape threw: boom" });
+  });
+});
+
+describe("sidebarLiveState", () => {
+  it("reads the row status icon (loader while running; labelled dot otherwise)", () => {
+    expect(sidebarLiveState(true, "", "")).toBe("working");
+    expect(sidebarLiveState(false, "Completed", "done-seen")).toBe("idle");
+    expect(sidebarLiveState(false, "Completed", "done-unseen")).toBe("unread");
+    expect(sidebarLiveState(false, "Needs approval", "")).toBe("waiting_approval");
+    expect(sidebarLiveState(false, "Error", "error")).toBe("error");
+    expect(sidebarLiveState(undefined, undefined, undefined)).toBe("idle");
+  });
+
+  it("is attached to parsed chats", () => {
+    const res = parseSidebarSnapshot([
+      {
+        sectionId: "workspace:x",
+        name: "x",
+        chats: [{ composerId: CHAT_A, title: "t", ageLabel: "now", running: true }],
+      },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.sections[0]!.chats[0]!.live).toBe("working");
   });
 });

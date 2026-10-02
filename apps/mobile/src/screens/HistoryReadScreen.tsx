@@ -15,6 +15,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Markdown } from '../components/Markdown';
+import { loadLockSettings, unlock } from '../security/app-lock';
 import { createHubClient } from '../hub/client';
 import { HubApiError, type ChatMessage } from '../hub/types';
 import type { RootStackParamList } from '../navigation/types';
@@ -51,6 +52,13 @@ export function HistoryReadScreen({ navigation, route }: Props) {
   const [sending, setSending] = useState(false);
   /** Sent from the phone but not yet in the PC transcript. */
   const [pending, setPending] = useState<string[]>([]);
+  /** Live run state of this chat on the PC (from the Agents sidebar). */
+  const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  /** Totals of files this chat changed on the PC (null until loaded / none). */
+  const [changes, setChanges] = useState<{ files: number; added: number; removed: number } | null>(
+    null,
+  );
 
   const client = useMemo(() => {
     if (!session.hubBaseUrl || !session.deviceToken) return null;
@@ -63,8 +71,15 @@ export function HistoryReadScreen({ navigation, route }: Props) {
       return;
     }
     try {
-      const packed = await client.getSessionMessages(sessionId);
+      const [packed, agents] = await Promise.all([
+        client.getSessionMessages(sessionId),
+        client.listAgents().catch(() => null),
+      ]);
       setMessages(packed.messages);
+      if (agents && composerId) {
+        const chat = agents.projects.flatMap((p) => p.chats).find((c) => c.composerId === composerId);
+        setRunning(chat?.status === 'working');
+      }
       // Drop optimistic bubbles once the PC transcript contains them.
       setPending((prev) =>
         prev.filter(
@@ -77,7 +92,7 @@ export function HistoryReadScreen({ navigation, route }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [client, sessionId, navigation]);
+  }, [client, sessionId, composerId, navigation]);
 
   useEffect(() => {
     void load();
@@ -85,12 +100,42 @@ export function HistoryReadScreen({ navigation, route }: Props) {
     return () => clearInterval(id);
   }, [load]);
 
+  // Re-count changed files whenever the transcript grows (a turn may have edited files).
+  useEffect(() => {
+    if (!client || !composerId) return;
+    let cancelled = false;
+    client
+      .listChatChanges(composerId)
+      .then(({ files }) => {
+        if (cancelled) return;
+        setChanges(
+          files.length === 0
+            ? null
+            : {
+                files: files.length,
+                added: files.reduce((n, f) => n + f.added, 0),
+                removed: files.reduce((n, f) => n + f.removed, 0),
+              },
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [client, composerId, messages.length]);
+
   const send = async () => {
     const text = draft.trim();
     if (!text || !client || !composerId || sending) return;
     setSending(true);
     setError(null);
     try {
+      // Sending makes an agent act on the PC — gate it behind fingerprint / PIN (Account → Security).
+      const { lockSend } = await loadLockSettings();
+      if (!(await unlock(lockSend, 'Unlock to send to your PC'))) {
+        setError('Not sent — unlock was cancelled');
+        return;
+      }
       await client.sendToAgentChat(composerId, text);
       setDraft('');
       setPending((prev) => [...prev, text]);
@@ -102,6 +147,21 @@ export function HistoryReadScreen({ navigation, route }: Props) {
       );
     } finally {
       setSending(false);
+    }
+  };
+
+  const stop = async () => {
+    if (!client || !composerId || stopping) return;
+    setStopping(true);
+    setError(null);
+    try {
+      await client.stopAgentChat(composerId);
+      setRunning(false);
+      setTimeout(() => void load(), 1_500);
+    } catch (err) {
+      setError(err instanceof HubApiError ? `Not stopped — ${err.message}` : 'Not stopped — check the connection');
+    } finally {
+      setStopping(false);
     }
   };
 
@@ -169,6 +229,40 @@ export function HistoryReadScreen({ navigation, route }: Props) {
       </ScrollView>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {running ? (
+        <View style={styles.workingBar} testID="chat-working">
+          <ActivityIndicator color={colors.accent} size="small" />
+          <Text style={styles.workingText}>Agent working on your PC…</Text>
+          <Pressable
+            onPress={() => void stop()}
+            disabled={stopping}
+            style={styles.stopBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Stop the agent"
+            testID="chat-stop"
+          >
+            <Text style={styles.stopText}>{stopping ? 'Stopping…' : 'Stop'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {changes && composerId ? (
+        <Pressable
+          style={styles.changesBar}
+          onPress={() => navigation.navigate('ChatChanges', { composerId, title })}
+          accessibilityRole="button"
+          accessibilityLabel={`${changes.files} files changed, view changes`}
+          testID="chat-changes"
+        >
+          <Text style={styles.changesText}>
+            {changes.files} file{changes.files === 1 ? '' : 's'} changed{'  '}
+            <Text style={styles.plus}>+{changes.added}</Text>{' '}
+            <Text style={styles.minus}>−{changes.removed}</Text>
+          </Text>
+          <Text style={styles.changesLink}>View changes ›</Text>
+        </Pressable>
+      ) : null}
 
       {composerId ? (
         <View style={[styles.composer, { paddingBottom: spacing.sm + insets.bottom }]}>
@@ -253,5 +347,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   sendDisabled: { backgroundColor: colors.border },
+  changesBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  changesText: { color: colors.text, fontSize: 13 },
+  workingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.accentSoft,
+  },
+  workingText: { flex: 1, color: colors.text, fontSize: 13 },
+  stopBtn: {
+    minHeight: 32,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    justifyContent: 'center',
+  },
+  stopText: { color: colors.danger, fontWeight: '700', fontSize: 13 },
+  changesLink: { color: colors.accent, fontSize: 13, fontWeight: '600' },
+  plus: { color: colors.accent },
+  minus: { color: colors.danger },
   sendText: { color: colors.accentText, fontWeight: '700', fontSize: 16 },
 });

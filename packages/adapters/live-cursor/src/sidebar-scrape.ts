@@ -21,6 +21,23 @@ export interface SidebarChat {
   ageLabel: string;
   /** Currently selected in the PC sidebar. */
   active: boolean;
+  /**
+   * Live state from the sidebar status icon (the local DB only settles after a run ends —
+   * it reads `aborted` for the whole run). Absent on older snapshots.
+   */
+  live?: SidebarLiveState;
+}
+
+export type SidebarLiveState = "working" | "waiting_approval" | "error" | "unread" | "idle";
+
+/** Map the row's status icon to a live state. Unknown labels fall back to idle. */
+export function sidebarLiveState(running: unknown, label: unknown, variant: unknown): SidebarLiveState {
+  if (running === true) return "working";
+  const text = `${typeof label === "string" ? label : ""} ${typeof variant === "string" ? variant : ""}`.toLowerCase();
+  if (/approv|waiting|needs.?input|blocked/.test(text)) return "waiting_approval";
+  if (/error|fail|abort|stopped/.test(text)) return "error";
+  if (/unseen|unread/.test(text)) return "unread";
+  return "idle";
 }
 
 export interface SidebarSection {
@@ -51,6 +68,15 @@ export const SIDEBAR_SCRAPE_EXPRESSION = `(() => {
         active: !!btn && (btn.getAttribute("data-active") === "true"
           || btn.getAttribute("aria-current") === "page"
           || btn.getAttribute("aria-selected") === "true"),
+        // Live run state from the row's status icon: an animated loader while the agent
+        // runs, otherwise a labelled dot (aria-label "Completed", data-variant "done-seen"…).
+        running: !!li.querySelector(".ui-sidebar-menu-button-status-icon .ui-dot-grid-loader"),
+        statusLabel: (li.querySelector(".ui-sidebar-menu-button-status-icon [role=img]") || {}).getAttribute
+          ? li.querySelector(".ui-sidebar-menu-button-status-icon [role=img]").getAttribute("aria-label") || ""
+          : "",
+        statusVariant: (li.querySelector(".ui-sidebar-menu-button-status-icon [data-variant]") || {}).getAttribute
+          ? li.querySelector(".ui-sidebar-menu-button-status-icon [data-variant]").getAttribute("data-variant") || ""
+          : "",
       };
     });
     const hasMore = [...sec.querySelectorAll("li, [role=button]")]
@@ -96,6 +122,7 @@ export function parseSidebarSnapshot(value: unknown): SidebarScrapeResult {
         title: typeof c.title === "string" ? c.title : "",
         ageLabel: typeof c.ageLabel === "string" ? c.ageLabel : "",
         active: c.active === true,
+        live: sidebarLiveState(c.running, c.statusLabel, c.statusVariant),
       });
     }
     sections.push({

@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createMockCdpClient } from "./cdp-client.js";
-import { openAgentChat, sendToAgentChat } from "./chat-send.js";
+import { openAgentChat, sendToAgentChat, stopAgentChat } from "./chat-send.js";
 import type { ActionSelector } from "./selector-pack.js";
 
 const TARGET = "466762d6-04ca-46e6-a047-4ad7932ae829";
@@ -95,5 +95,27 @@ describe("sendToAgentChat", () => {
     });
     expect(res).toMatchObject({ ok: false, code: "CHAT_SWITCH_FAILED" });
     expect(methods(client)).not.toContain("Input.insertText");
+  });
+});
+
+describe("stopAgentChat", () => {
+  it("clicks Stop generation in the target chat", async () => {
+    const client = fakeCursor({ open: TARGET });
+    const res = await stopAgentChat(client, TARGET, { wait: noWait });
+    expect(res.ok).toBe(true);
+    const evals = client.calls.filter((c) => c.method === "Runtime.evaluate").map((c) => String(c.params.expression));
+    expect(evals.some((e) => e.includes("Stop generation"))).toBe(true);
+  });
+
+  it("reports NOT_RUNNING and clicks nothing when there is no stop button", async () => {
+    const client = createMockCdpClient({
+      "Runtime.evaluate": (params) =>
+        String(params.expression).includes('querySelector("[data-composer-id]")')
+          ? { result: { value: TARGET } }
+          : { result: { value: null } },
+    });
+    const res = await stopAgentChat(client, TARGET, { wait: noWait });
+    expect(res).toMatchObject({ ok: false, code: "NOT_RUNNING" });
+    expect(client.calls.map((c) => c.method)).not.toContain("Input.dispatchMouseEvent");
   });
 });

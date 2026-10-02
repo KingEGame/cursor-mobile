@@ -1,0 +1,48 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:1:1-19:12
+INJECTED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:1:1-19:12
+	package
+		INJECTED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.INTERNET
+ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:2:3-65
+	android:name
+		ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:2:20-62
+uses-permission#android.permission.POST_NOTIFICATIONS
+ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:3:3-75
+	android:name
+		ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:3:20-72
+uses-permission#android.permission.FOREGROUND_SERVICE
+ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:4:3-75
+	android:name
+		ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:4:20-72
+uses-permission#android.permission.FOREGROUND_SERVICE_SPECIAL_USE
+ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:5:3-87
+	android:name
+		ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:5:20-84
+application
+ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:7:3-18:17
+service#expo.modules.pcwatch.PcWatchService
+ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:10:5-17:15
+	android:exported
+		ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:12:7-31
+	android:foregroundServiceType
+		ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:13:7-49
+	android:name
+		ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:11:7-57
+property#android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE
+ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:14:7-16:106
+	android:value
+		ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:16:9-103
+	android:name
+		ADDED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml:15:9-68
+uses-sdk
+INJECTED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml
+INJECTED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /mnt/data/projects/cursor_mobile/apps/mobile/modules/pc-watch/android/src/main/AndroidManifest.xml

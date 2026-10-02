@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { AgentChatDetails } from "@cursor-mobile/history";
-import { buildAgentsResponse, type AgentsIndex } from "../src/agents.js";
+import { agentComposerId, buildAgentsResponse, type AgentsIndex } from "../src/agents.js";
 
 const NOW = new Date("2026-10-01T21:00:00.000Z");
 const ID = "466762d6-04ca-46e6-a047-4ad7932ae829";
@@ -26,6 +26,8 @@ const detail: AgentChatDetails = {
 const index: AgentsIndex = {
   describe: (ids) => new Map(ids.filter((i) => i === ID).map((i) => [i, detail])),
   recent: () => [{ projectId: "185f", name: "omnitouter", path: "/data/projects/omnitouter", chats: [detail] }],
+  changes: () => [],
+  fileDiff: () => null,
 };
 
 describe("buildAgentsResponse", () => {
@@ -113,5 +115,13 @@ describe("POST /v1/agents/chats/:id/messages", () => {
       ok: false,
       code: "CHAT_NOT_IN_SIDEBAR",
     });
+  });
+});
+
+describe("agentComposerId", () => {
+  it("accepts local chat ids and rejects cloud or malformed ones", () => {
+    expect(agentComposerId(ID.toUpperCase())).toBe(ID);
+    expect(() => agentComposerId("bc-64eb9b50-740d-48ba-9863-9cef302ce9b1")).toThrow(/local Cursor chat/);
+    expect(() => agentComposerId("../../etc/passwd")).toThrow();
   });
 });

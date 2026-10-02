@@ -19,8 +19,9 @@ import {
   pendingSessionCreateCount,
   snapshotSessionCreateQueue,
 } from "../../src/session-create-queue.js";
+import { REPO_ROOT } from "../repo-root.js";
 
-const WORKSPACE = "/data/projects/cursor_mobile";
+const WORKSPACE = REPO_ROOT;
 
 describe("session-create-queue", () => {
   it("enqueues prompt/model/attaches and dedupes by idempotency key", () => {

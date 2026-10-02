@@ -13,8 +13,9 @@ import {
   PairingStore,
   resolveWorkspace,
 } from "../../src/config.js";
+import { REPO_ROOT } from "../repo-root.js";
 
-const WORKSPACE = "/data/projects/cursor_mobile";
+const WORKSPACE = REPO_ROOT;
 
 function histSession(
   overrides: Partial<HistorySessionDetail> & {

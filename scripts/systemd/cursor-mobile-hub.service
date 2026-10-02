@@ -1,0 +1,15 @@
+[Unit]
+Description=Cursor Mobile Hub (PC-local companion server)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=__REPO_ROOT__/scripts/hub-service-run.sh
+Restart=always
+RestartSec=5
+# node lives in ~/.local/bin on this PC; keep the usual user paths available.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
