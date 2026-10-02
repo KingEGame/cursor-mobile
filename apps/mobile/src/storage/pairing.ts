@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
+import { rememberHub } from './known-hubs';
 import { normalizeHubBaseUrl } from './hub-url';
 
 export { HUB_URL_HINTS, normalizeHubBaseUrl } from './hub-url';
@@ -68,6 +69,13 @@ export async function savePairingSuccess(input: {
     SecureStore.setItemAsync(KEYS.deviceId, input.deviceId),
     SecureStore.setItemAsync(KEYS.hubDisplayName, input.hubDisplayName),
   ]);
+  // Remember this PC so Account → Computer can switch back to it later.
+  await rememberHub({
+    hubBaseUrl,
+    deviceToken: input.deviceToken,
+    deviceId: input.deviceId,
+    hubDisplayName: input.hubDisplayName,
+  });
 }
 
 export async function clearPairing(): Promise<void> {

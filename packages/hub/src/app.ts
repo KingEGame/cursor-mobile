@@ -7,6 +7,7 @@ import express, {
 import type { HubContext } from "./config.js";
 import { ApiError, errorBody } from "./errors.js";
 import { createApiRouter } from "./routes/api.js";
+import { createPairPageRouter } from "./pair-page.js";
 
 export function createApp(ctx: HubContext): Express {
   const app = express();
@@ -18,6 +19,8 @@ export function createApp(ctx: HubContext): Express {
   const api = createApiRouter(ctx);
   // TOR-03 versioned surface
   app.use("/v1", api);
+  // PC-only pairing page with the QR for the phone camera (loopback-only).
+  app.use(createPairPageRouter(ctx));
   // Unversioned aliases (AGENT-CONTEXT shorthand)
   app.use(api);
 

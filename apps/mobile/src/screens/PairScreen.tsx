@@ -1,3 +1,5 @@
+import { QrCode } from 'lucide-react-native';
+import { QrScanner } from '../components/QrScanner';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -69,6 +71,7 @@ export function PairScreen({ navigation }: Props) {
   const [deviceName, setDeviceName] = useState('Android phone');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
   const autoStarted = useRef(false);
   const hubUrlRef = useRef(hubUrl);
   hubUrlRef.current = hubUrl;
@@ -270,6 +273,33 @@ export function PairScreen({ navigation }: Props) {
           Hub must be running on the PC. No cloud login — this binds your phone to this PC only.
         </Text>
 
+        <Pressable
+          style={styles.scanBtn}
+          onPress={() => setScanning(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Scan QR"
+          testID="pair-scan-qr"
+        >
+          <QrCode size={22} color={colors.accentText} strokeWidth={2} />
+          <Text style={styles.scanText}>Scan QR</Text>
+        </Pressable>
+        <Text style={styles.hint}>
+          On the PC open http://127.0.0.1:8787/pair — it shows the QR. Or enter the code below.
+        </Text>
+        <QrScanner
+          visible={scanning}
+          onClose={() => setScanning(false)}
+          onScan={(data) => {
+            setScanning(false);
+            const parsed = parsePairDeepLink(data);
+            if (!parsed?.code) {
+              setError('That QR is not a Cursor Mobile pairing code. Open 127.0.0.1:8787/pair on the PC.');
+              return;
+            }
+            applyPairParams(parsed);
+          }}
+        />
+
         {shouldShowTailscaleGuide({ beforePair: true }) ? (
           <View style={styles.guideBox} accessibilityLabel="Tailscale setup steps">
             <Text style={styles.guideTitle}>{TAILSCALE_SETUP_TITLE}</Text>
@@ -371,6 +401,17 @@ export function PairScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  scanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 56,
+    borderRadius: 999,
+    backgroundColor: colors.accent,
+    marginTop: 16,
+  },
+  scanText: { color: colors.accentText, fontSize: 18, fontWeight: '700' },
   root: {
     flex: 1,
     backgroundColor: colors.bg,

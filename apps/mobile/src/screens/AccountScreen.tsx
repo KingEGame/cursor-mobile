@@ -10,6 +10,9 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Check, ChevronRight, Monitor, RefreshCw } from 'lucide-react-native';
+import { loadKnownHubs, rememberHub, type KnownHub } from '../storage/known-hubs';
+import { savePairingSuccess } from '../storage/pairing';
 import { ConnectionChip } from '../components/ConnectionChip';
 import { UpdateCard } from '../components/UpdateCard';
 import { decideUpdate, type UpdateStatus } from '../hub/app-update';
@@ -43,6 +46,10 @@ export function AccountScreen({ navigation }: Props) {
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const [lastApiError, setLastApiError] = useState<HubApiError | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ kind: 'unknown' });
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const [knownHubs, setKnownHubs] = useState<KnownHub[]>([]);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const { refreshFromStorage } = session;
 
   const connectionState = deriveConnectionState({
     hubBaseUrl: session.hubBaseUrl,
@@ -70,6 +77,7 @@ export function AccountScreen({ navigation }: Props) {
       ]);
       setHealthAndWorkspace(health, workspace);
       setLastApiError(null);
+      setLastSynced(new Date());
 
       // Self-update check — an older Hub without /v1/app/* just means "no feed".
       client
@@ -109,6 +117,41 @@ export function AccountScreen({ navigation }: Props) {
     void refresh();
   }, [refresh]);
 
+  // Saved PCs; seed the list with the current pairing for phones paired before it existed.
+  useEffect(() => {
+    void (async () => {
+      let list = await loadKnownHubs();
+      if (session.deviceToken && session.deviceId && session.hubBaseUrl && list.length === 0) {
+        await rememberHub({
+          hubBaseUrl: session.hubBaseUrl,
+          deviceToken: session.deviceToken,
+          deviceId: session.deviceId,
+          hubDisplayName: session.hubDisplayName,
+        });
+        list = await loadKnownHubs();
+      }
+      setKnownHubs(list);
+    })();
+  }, [session.deviceToken, session.deviceId, session.hubBaseUrl, session.hubDisplayName]);
+
+  /** Switch the phone to another saved PC; stay on the current one if it cannot be reached. */
+  const switchTo = async (hub: KnownHub) => {
+    setSwitchError(null);
+    try {
+      await createHubClient({ baseUrl: hub.hubBaseUrl, deviceToken: hub.deviceToken }).getHealth();
+    } catch {
+      setSwitchError(`${hub.hubDisplayName || hub.hubBaseUrl} is not reachable — staying on this PC`);
+      return;
+    }
+    await savePairingSuccess({
+      hubBaseUrl: hub.hubBaseUrl,
+      deviceToken: hub.deviceToken,
+      deviceId: hub.deviceId,
+      hubDisplayName: hub.hubDisplayName || 'PC',
+    });
+    await refreshFromStorage();
+  };
+
   const unpair = async () => {
     await clearDevice();
     navigation.replace('Pair');
@@ -128,36 +171,71 @@ export function AccountScreen({ navigation }: Props) {
       }
     >
       <View style={styles.topBar}>
-        <Text style={styles.title}>Account</Text>
+        <Text style={styles.title}>Settings</Text>
         <ConnectionChip
           state={connectionState}
           onPress={() => navigation.navigate('Health')}
         />
       </View>
-
-      <Text style={styles.lead}>{connectionStateLabel(connectionState)}</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
+      <Text style={styles.section}>Connection</Text>
       <View style={styles.card}>
-        <Text style={styles.cardLabel}>Hub</Text>
-        <Text style={styles.cardValue}>
-          {session.hubDisplayName || 'Desk PC'}
-        </Text>
-        <Text style={styles.cardMeta} numberOfLines={2}>
-          {session.hubBaseUrl || '—'}
-        </Text>
+        <Row title="Status" meta={connectionStateLabel(connectionState)} />
+        <Row
+          title="How it works"
+          meta="On the PC open 127.0.0.1:8787/pair to show a QR; on this phone tap Pair a PC → Scan QR. Cursor stays on the PC — the phone is a remote over Tailscale."
+        />
+        <ActionRow label="Pair a PC" onPress={() => navigation.navigate('Pair')} testID="account-repair" />
       </View>
 
+      <Text style={styles.section}>Computer</Text>
       <View style={styles.card}>
-        <Text style={styles.cardLabel}>PC project</Text>
-        <Text style={styles.cardValue}>{projectName}</Text>
-        {session.workspace && isWorkspaceBound(session.workspace) ? (
-          <Text style={styles.cardMeta} numberOfLines={2}>
-            {session.workspace.path}
-          </Text>
-        ) : (
-          <Text style={styles.cardMeta}>Open a folder in Cursor on the PC.</Text>
-        )}
+        <Text style={styles.cardMeta}>Chats and projects come from this PC's Hub.</Text>
+        {(knownHubs.length ? knownHubs : []).map((hub) => {
+          const active = hub.hubBaseUrl === session.hubBaseUrl;
+          return (
+            <Pressable
+              key={hub.hubBaseUrl}
+              style={({ pressed }) => [styles.pcRow, pressed && !active && styles.pressed]}
+              onPress={() => (active ? undefined : void switchTo(hub))}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel="Choose computer"
+            >
+              <Monitor size={20} color={active ? colors.accent : colors.muted} strokeWidth={1.75} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowTitle, active && { color: colors.accent }]}>
+                  {hub.hubDisplayName || 'PC'}
+                </Text>
+                <Text style={styles.cardMeta}>{hub.hubBaseUrl}</Text>
+              </View>
+              {active ? <Check size={18} color={colors.accent} /> : null}
+            </Pressable>
+          );
+        })}
+        {knownHubs.length === 0 ? <Text style={styles.cardMeta}>No computers saved — pair with a Hub first.</Text> : null}
+        {switchError ? <Text style={styles.error}>{switchError}</Text> : null}
+        <Row title="Project bound on PC" meta={`${projectName}${session.workspace && isWorkspaceBound(session.workspace) ? ' · ' + session.workspace.path : ''}`} />
+      </View>
+
+      <Text style={styles.section}>Sync</Text>
+      <View style={styles.card}>
+        <Row
+          title="Refresh now"
+          meta={`Reload projects and chats from the selected computer.${lastSynced ? ` Last synced ${lastSynced.toLocaleTimeString()}.` : ''}`}
+        />
+        <Pressable
+          style={[styles.primary, busy && { opacity: 0.6 }]}
+          onPress={() => void refresh()}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh from computer"
+          testID="account-refresh-now"
+        >
+          <RefreshCw size={18} color={colors.accentText} />
+          <Text style={styles.primaryText}>{busy ? 'Syncing…' : 'Refresh now'}</Text>
+        </Pressable>
       </View>
 
       <UpdateCard
@@ -170,59 +248,60 @@ export function AccountScreen({ navigation }: Props) {
 
       <SecurityCard />
 
-      {pendingApprovals > 0 ? (
-        <View style={styles.card} testID="account-approvals-badge">
-          <Text style={styles.cardLabel}>Approvals</Text>
-          <Text style={styles.cardValue}>
-            {pendingApprovals} pending in live chats
-          </Text>
-          <Text style={styles.cardMeta}>
-            Open a live chat to Approve or Deny — tools run on the PC.
-          </Text>
-        </View>
-      ) : null}
-
-      <Pressable
-        style={styles.rowBtn}
-        onPress={() => navigation.navigate('Health')}
-        accessibilityRole="button"
-        testID="account-health"
-      >
-        <Text style={styles.rowBtnText}>Health details</Text>
-      </Pressable>
-
-      <Pressable
-        style={styles.rowBtn}
-        onPress={() => navigation.navigate('Editor')}
-        accessibilityRole="button"
-        testID="account-editor"
-      >
-        <Text style={styles.rowBtnText}>Browse PC files</Text>
-        <Text style={styles.rowBtnMeta}>Optional · workspace roots only</Text>
-      </Pressable>
-
-      <Pressable
-        style={styles.rowBtn}
-        onPress={() => navigation.navigate('Pair')}
-        accessibilityRole="button"
-        testID="account-repair"
-      >
-        <Text style={styles.rowBtnText}>Re-pair device</Text>
-      </Pressable>
-
-      <Pressable
-        style={[styles.rowBtn, styles.dangerRow]}
-        onPress={() => void unpair()}
-        accessibilityRole="button"
-        testID="account-unpair"
-      >
-        <Text style={styles.dangerText}>Clear pairing</Text>
-      </Pressable>
+      <Text style={styles.section}>Advanced</Text>
+      <View style={styles.card}>
+        <ActionRow label="Health details" onPress={() => navigation.navigate('Health')} testID="account-health" />
+        <ActionRow label="Browse PC files" meta="Workspace roots only" onPress={() => navigation.navigate('Editor')} testID="account-editor" />
+        <ActionRow label="Clear pairing" danger onPress={() => void unpair()} testID="account-unpair" />
+      </View>
     </ScrollView>
   );
 }
 
+function Row(props: { title: string; meta: string }) {
+  return (
+    <View style={styles.row}>
+      <Text style={styles.rowTitle}>{props.title}</Text>
+      <Text style={styles.cardMeta}>{props.meta}</Text>
+    </View>
+  );
+}
+
+function ActionRow(props: { label: string; meta?: string; danger?: boolean; onPress: () => void; testID?: string }) {
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.actionRow, pressed && styles.pressed]}
+      onPress={props.onPress}
+      accessibilityRole="button"
+      testID={props.testID}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.rowTitle, props.danger && { color: colors.danger }]}>{props.label}</Text>
+        {props.meta ? <Text style={styles.cardMeta}>{props.meta}</Text> : null}
+      </View>
+      <ChevronRight size={18} color={colors.muted} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  section: { color: colors.muted, fontSize: 13, fontWeight: '600', marginTop: spacing.md, marginBottom: spacing.xs },
+  row: { paddingVertical: spacing.xs, gap: 2 },
+  rowTitle: { color: colors.text, fontSize: 16 },
+  pcRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 52, borderRadius: radii.sm, paddingHorizontal: spacing.xs },
+  actionRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderRadius: radii.sm, paddingHorizontal: spacing.xs },
+  pressed: { backgroundColor: colors.surfaceMuted },
+  primary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    minHeight: 48,
+    borderRadius: radii.pill,
+    backgroundColor: colors.accent,
+    marginTop: spacing.sm,
+  },
+  primaryText: { color: colors.accentText, fontWeight: '700', fontSize: 16 },
   root: { flex: 1, backgroundColor: colors.bg },
   content: {
     paddingHorizontal: spacing.md,

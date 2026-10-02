@@ -279,6 +279,14 @@ export class PairingStore {
     return pending;
   }
 
+  /** Status of one pairing code, for the PC pairing page. */
+  pendingStatus(pairId: string): "waiting" | "paired" | "expired" | "unknown" {
+    const p = this.pending.get(pairId);
+    if (!p) return "unknown";
+    if (p.used) return "paired";
+    return p.expiresAt.getTime() < Date.now() ? "expired" : "waiting";
+  }
+
   findPending(code: string, pairId?: string): PendingPair | undefined {
     if (pairId) {
       const byId = this.pending.get(pairId);
