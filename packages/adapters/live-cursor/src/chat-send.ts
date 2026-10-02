@@ -15,6 +15,83 @@ import {
   resolveElementCenter,
 } from "./cdp-input.js";
 import type { ActionSelector } from "./selector-pack.js";
+import { applyComposerOptions, type AgentMode } from "./composer-options.js";
+import { insertMentions, type MentionRef } from "./mentions.js";
+import { pasteImages, removePastedImages, type PastedImage } from "./images.js";
+
+/** Optional composer settings applied (and verified) before the text is typed. */
+export interface ComposerSendOptions {
+  mode?: AgentMode | null;
+  model?: string | null;
+  /** "@" files / plugins and "/" skills, inserted as Cursor chips before the text. */
+  mentions?: MentionRef[];
+  /** Phone photos pasted into the composer before the text. */
+  images?: PastedImage[];
+}
+
+/** Empty the PC composer (used when a send is aborted half-way). */
+export async function clearComposer(client: CdpClient): Promise<void> {
+  await client.send("Runtime.evaluate", {
+    expression: `(() => { const e = document.querySelector(".ui-prompt-input-editor__input[contenteditable='true']"); if (e) e.focus(); })()`,
+  });
+  for (const [k, code, vk, mods] of [["a", "KeyA", 65, 2], ["Backspace", "Backspace", 8, 0]] as const) {
+    for (const type of ["keyDown", "keyUp"] as const) {
+      await client.send("Input.dispatchKeyEvent", { type, key: k, code, windowsVirtualKeyCode: vk, modifiers: mods });
+    }
+  }
+}
+
+/**
+ * Apply mode/model, insert chips, then type `text` at the end and submit — all verified.
+ * On any failure the composer is cleared so nothing half-made is left on the PC.
+ */
+async function composeAndSubmit(
+  client: CdpClient,
+  text: string,
+  sendSelector: ActionSelector,
+  composer: ComposerSendOptions | undefined,
+  methods: string[],
+  wait: Wait,
+): Promise<ChatSendResult | null> {
+  if (composer?.mode || composer?.model) {
+    const applied = await applyComposerOptions(client, composer, wait);
+    if (!applied.ok) return { ok: false, code: applied.code, error: applied.error, methods };
+  }
+  if (composer?.images?.length) {
+    const pasted = await pasteImages(client, composer.images, wait);
+    if (!pasted.ok) {
+      await removePastedImages(client);
+      return { ok: false, code: pasted.code, error: pasted.error, methods };
+    }
+  }
+  if (composer?.mentions?.length) {
+    const added = await insertMentions(client, composer.mentions, wait);
+    if (!added.ok) {
+      await clearComposer(client);
+      await removePastedImages(client);
+      return { ok: false, code: added.code === "CDP_INPUT_FAILED" ? "CDP_INPUT_FAILED" : "MENTION_NOT_APPLIED", error: added.error, methods };
+    }
+    // Chips are in place and the caret sits after them: type the text there.
+    methods.push("Input.insertText");
+    await client.send("Input.insertText", { text: text.startsWith(" ") ? text : ` ${text}` });
+    for (const type of ["keyDown", "keyUp"] as const) {
+      await client.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    }
+  } else {
+    const typed = await executeTypeAndSubmit(client, "send_message", sendSelector, text);
+    methods.push(...typed.methods);
+    if (!typed.ok) return { ok: false, code: "CDP_INPUT_FAILED", error: typed.error, methods };
+  }
+  if (!(await confirmSubmitted(client, methods, wait))) {
+    return {
+      ok: false,
+      code: "SEND_NOT_CONFIRMED",
+      error: "The text is in the PC chat box but Cursor did not send it",
+      methods,
+    };
+  }
+  return null;
+}
 
 export type ChatSendResult =
   | { ok: true; switched: boolean; methods: string[]; composerId?: string }
@@ -26,7 +103,14 @@ export type ChatSendResult =
         | "CDP_INPUT_FAILED"
         | "NOT_RUNNING"
         | "PROJECT_NOT_IN_SIDEBAR"
-        | "NEW_CHAT_FAILED";
+        | "NEW_CHAT_FAILED"
+        | "MODE_NOT_APPLIED"
+        | "MODEL_NOT_APPLIED"
+        | "SEND_NOT_CONFIRMED"
+        | "MESSAGE_NOT_FOUND"
+        | "EDIT_FAILED"
+        | "MENTION_NOT_APPLIED"
+        | "IMAGE_NOT_ATTACHED";
       error: string;
       methods: string[];
     };
@@ -145,17 +229,15 @@ export async function sendToAgentChat(
   composerId: string,
   text: string,
   sendSelector: ActionSelector,
-  opts: { wait?: Wait; switchTimeoutMs?: number } = {},
+  opts: { wait?: Wait; switchTimeoutMs?: number; composer?: ComposerSendOptions } = {},
 ): Promise<ChatSendResult> {
   const opened = await openAgentChat(client, composerId, opts);
   if (!opened.ok) return opened;
   // Let the composer for the newly opened chat mount before focusing its input.
   if (opened.switched) await (opts.wait ?? realWait)(250);
-  const typed = await executeTypeAndSubmit(client, "send_message", sendSelector, text);
-  const methods = [...opened.methods, ...typed.methods];
-  if (!typed.ok) {
-    return { ok: false, code: "CDP_INPUT_FAILED", error: typed.error, methods };
-  }
+  const methods = [...opened.methods];
+  const failed = await composeAndSubmit(client, text, sendSelector, opts.composer, methods, opts.wait ?? realWait);
+  if (failed) return failed;
   return { ok: true, switched: opened.switched, methods };
 }
 
@@ -205,7 +287,7 @@ export async function newAgentChat(
   sectionId: string,
   text: string,
   sendSelector: ActionSelector,
-  opts: { wait?: Wait; timeoutMs?: number } = {},
+  opts: { wait?: Wait; timeoutMs?: number; composer?: ComposerSendOptions } = {},
 ): Promise<ChatSendResult> {
   const methods: string[] = [];
   const wait = opts.wait ?? realWait;
@@ -261,9 +343,8 @@ export async function newAgentChat(
       };
     }
 
-    const typed = await executeTypeAndSubmit(client, "send_message", sendSelector, text);
-    methods.push(...typed.methods);
-    if (!typed.ok) return { ok: false, code: "CDP_INPUT_FAILED", error: typed.error, methods };
+    const failed = await composeAndSubmit(client, text, sendSelector, opts.composer, methods, wait);
+    if (failed) return failed;
 
     // Cursor promotes the draft to a new composer id on the first send; report the id the
     // chat actually has afterwards, so the phone opens the chat with the message in it.
@@ -294,5 +375,121 @@ export async function newAgentChat(
       error: err instanceof Error ? err.message : String(err),
       methods,
     };
+  }
+}
+
+const EDITOR_TEXT = `(() => { const ed = document.querySelector(".ui-prompt-input-editor__input[contenteditable='true']"); return ed ? ed.textContent.trim() : null; })()`;
+
+/**
+ * Prove the message left the composer. Enter is sometimes swallowed (e.g. right after a
+ * menu closed), so if text is still there click Cursor's "Send message" button and re-check.
+ * Never report success while the text is still sitting in the PC composer.
+ */
+export async function confirmSubmitted(
+  client: CdpClient,
+  methods: string[],
+  wait: Wait = realWait,
+): Promise<boolean> {
+  const emptied = async (ms: number) => {
+    for (let waited = 0; waited <= ms; waited += 200) {
+      const text = await evaluate<string | null>(client, EDITOR_TEXT, methods);
+      if (text === "") return true;
+      await wait(200);
+    }
+    return false;
+  };
+  if (await emptied(1200)) return true;
+  const send = await resolveElementCenter(client, ['.ui-prompt-input-submit-button[aria-label="Send message"]'], methods);
+  if (!send) return false;
+  await dispatchClick(client, send.box.x, send.box.y, methods);
+  return emptied(2000);
+}
+
+const BUBBLE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Edit one of the operator's earlier messages and resubmit it (Cursor re-runs from there).
+ *
+ * Cursor opens an inline editor when the user message row is clicked; the row's
+ * `data-message-id` is the same id as the DB bubble the phone shows. Each step is
+ * verified: editor opened in that row, text reads back exactly, editor closed on send.
+ */
+export async function editAgentMessage(
+  client: CdpClient,
+  composerId: string,
+  bubbleId: string,
+  text: string,
+  opts: { wait?: Wait; switchTimeoutMs?: number } = {},
+): Promise<ChatSendResult> {
+  if (!BUBBLE_ID.test(bubbleId)) {
+    return { ok: false, code: "MESSAGE_NOT_FOUND", error: "Not a Cursor message id", methods: [] };
+  }
+  const wait = opts.wait ?? realWait;
+  const opened = await openAgentChat(client, composerId, opts);
+  if (!opened.ok) return opened;
+  const methods = [...opened.methods];
+  const row = `document.querySelector(${JSON.stringify(
+    `[data-composer-id="${composerId}"] [data-message-role=human][data-message-id="${bubbleId.toLowerCase()}"]`,
+  )})`;
+  try {
+    if (opened.switched) await wait(400);
+    const target = await evaluate<{ x: number; y: number } | null>(
+      client,
+      `(() => { const r = ${row}; if (!r) return null; r.scrollIntoView({ block: "center" });
+        const b = (r.querySelector("p,span,div") || r).getBoundingClientRect();
+        return { x: b.x + Math.min(40, b.width / 2), y: b.y + b.height / 2 }; })()`,
+      methods,
+    );
+    if (!target) {
+      return { ok: false, code: "MESSAGE_NOT_FOUND", error: "That message is not visible in the PC chat", methods };
+    }
+    await dispatchClick(client, target.x, target.y, methods);
+    await wait(500);
+    const focused = await evaluate<boolean>(
+      client,
+      `(() => { const e = ${row} && ${row}.querySelector("[contenteditable=true]"); if (!e) return false; e.focus(); return true; })()`,
+      methods,
+    );
+    if (!focused) {
+      return { ok: false, code: "EDIT_FAILED", error: "Cursor did not open the message for editing", methods };
+    }
+    for (const type of ["keyDown", "keyUp"] as const) {
+      methods.push("Input.dispatchKeyEvent");
+      await client.send("Input.dispatchKeyEvent", { type, key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65 });
+    }
+    methods.push("Input.insertText");
+    await client.send("Input.insertText", { text });
+    await wait(250);
+    const readBack = await evaluate<string | null>(
+      client,
+      `(() => { const e = ${row} && ${row}.querySelector("[contenteditable=true]"); return e ? e.textContent : null; })()`,
+      methods,
+    );
+    if (readBack?.trim() !== text.trim()) {
+      await client.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      return { ok: false, code: "EDIT_FAILED", error: "Edited text did not land in the message — cancelled", methods };
+    }
+    const sendBtn = await evaluate<{ x: number; y: number } | null>(
+      client,
+      `(() => { const b = ${row} && ${row}.querySelector('[aria-label="Send message"]'); if (!b) return null;
+        const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+      methods,
+    );
+    if (!sendBtn) {
+      return { ok: false, code: "EDIT_FAILED", error: "No Send button on the edited message", methods };
+    }
+    await dispatchClick(client, sendBtn.x, sendBtn.y, methods);
+    for (let waited = 0; waited <= 2500; waited += 250) {
+      await wait(250);
+      const stillOpen = await evaluate<boolean>(
+        client,
+        `(() => !!(${row} && ${row}.querySelector("[contenteditable=true]")))()`,
+        methods,
+      );
+      if (!stillOpen) return { ok: true, switched: opened.switched, methods };
+    }
+    return { ok: false, code: "SEND_NOT_CONFIRMED", error: "Edited message was not resubmitted", methods };
+  } catch (err) {
+    return { ok: false, code: "CDP_INPUT_FAILED", error: err instanceof Error ? err.message : String(err), methods };
   }
 }

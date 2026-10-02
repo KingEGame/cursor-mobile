@@ -22,7 +22,7 @@ import {
   validateAttachmentPaths,
 } from "../workspace/files.js";
 import { buildToolsSummary } from "../workspace/tools.js";
-import { agentComposerId, buildAgentsResponse } from "../agents.js";
+import { agentComposerId, buildAgentsResponse, composerOptionsFromBody } from "../agents.js";
 import type { SessionCreateInput } from "../session-create-queue.js";
 import { lookupLatestRelease } from "../app-release.js";
 
@@ -1698,9 +1698,19 @@ export function createApiRouter(ctx: HubContext): Router {
       if (!text || text.length > 20_000) {
         throw new ApiError(400, "VALIDATION_ERROR", "text is required (max 20000 chars)");
       }
-      const result = await ctx.live.newAgentChat(sectionId, text);
+      const result = await ctx.live.newAgentChat(sectionId, text, composerOptionsFromBody(req.body));
       if (!result.ok) {
-        const status = result.code === "PROJECT_NOT_IN_SIDEBAR" ? 404 : result.code === "NEW_CHAT_FAILED" ? 409 : 503;
+        const status =
+          result.code === "PROJECT_NOT_IN_SIDEBAR"
+            ? 404
+            : result.code === "NEW_CHAT_FAILED" ||
+                result.code === "MODE_NOT_APPLIED" ||
+                result.code === "MODEL_NOT_APPLIED" ||
+                result.code === "SEND_NOT_CONFIRMED" ||
+                result.code === "MENTION_NOT_APPLIED" ||
+                result.code === "IMAGE_NOT_ATTACHED"
+              ? 409
+              : 503;
         throw new ApiError(status, result.code, result.error);
       }
       res.status(202).json({
@@ -1708,6 +1718,46 @@ export function createApiRouter(ctx: HubContext): Router {
         composerId: result.composerId ?? null,
         sessionId: result.composerId ? `hist_${result.composerId}` : null,
       });
+    }),
+  );
+
+  // What Cursor offers after "@" (files, plugins…) or "/" (skills) — read from the PC menu.
+  router.get(
+    "/agents/chats/:composerId/mentions",
+    requirePaired(ctx),
+    asyncRoute(async (req, res) => {
+      const composerId = agentComposerId(req.params.composerId);
+      const trigger = req.query.trigger === "/" ? "/" : req.query.trigger === "@" ? "@" : null;
+      if (!trigger) throw new ApiError(400, "VALIDATION_ERROR", "trigger must be @ or /");
+      const q = typeof req.query.q === "string" ? req.query.q.slice(0, 80) : "";
+      const result = await ctx.live.listAgentMentions(composerId, trigger, q);
+      if (!result.ok) throw new ApiError(503, result.code, result.error);
+      res.status(200).json({ trigger, query: q, options: result.options ?? [] });
+    }),
+  );
+
+  // Edit one of the operator's earlier messages and resubmit (Cursor re-runs from there).
+  router.put(
+    "/agents/chats/:composerId/messages/:messageId",
+    requirePaired(ctx),
+    asyncRoute(async (req, res) => {
+      const composerId = agentComposerId(req.params.composerId);
+      const bubbleId = pathParam(req.params.messageId).replace(/^m_/, "");
+      const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+      if (!text || text.length > 20_000) {
+        throw new ApiError(400, "VALIDATION_ERROR", "text is required (max 20000 chars)");
+      }
+      const result = await ctx.live.editAgentMessage(composerId, bubbleId, text);
+      if (!result.ok) {
+        const status =
+          result.code === "MESSAGE_NOT_FOUND" || result.code === "CHAT_NOT_IN_SIDEBAR"
+            ? 404
+            : result.code === "EDIT_FAILED" || result.code === "CHAT_SWITCH_FAILED" || result.code === "SEND_NOT_CONFIRMED"
+              ? 409
+              : 503;
+        throw new ApiError(status, result.code, result.error);
+      }
+      res.status(202).json({ ok: true, composerId, messageId: `m_${bubbleId}` });
     }),
   );
 
@@ -1738,10 +1788,19 @@ export function createApiRouter(ctx: HubContext): Router {
       if (text.length > 20_000) {
         throw new ApiError(400, "VALIDATION_ERROR", "text is too long (max 20000 chars)");
       }
-      const result = await ctx.live.sendToAgentChat(composerId, text);
+      const result = await ctx.live.sendToAgentChat(composerId, text, composerOptionsFromBody(req.body));
       if (!result.ok) {
         const status =
-          result.code === "CHAT_NOT_IN_SIDEBAR" ? 404 : result.code === "CHAT_SWITCH_FAILED" ? 409 : 503;
+          result.code === "CHAT_NOT_IN_SIDEBAR"
+            ? 404
+            : result.code === "CHAT_SWITCH_FAILED" ||
+                result.code === "MODE_NOT_APPLIED" ||
+                result.code === "MODEL_NOT_APPLIED" ||
+                result.code === "SEND_NOT_CONFIRMED" ||
+                result.code === "MENTION_NOT_APPLIED" ||
+                result.code === "IMAGE_NOT_ATTACHED"
+              ? 409
+              : 503;
         throw new ApiError(status, result.code, result.error);
       }
       res.status(202).json({ ok: true, composerId, switchedOnPc: result.switched });

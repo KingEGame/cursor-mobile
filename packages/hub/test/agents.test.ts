@@ -125,3 +125,16 @@ describe("agentComposerId", () => {
     expect(() => agentComposerId("../../etc/passwd")).toThrow();
   });
 });
+
+describe("composerOptionsFromBody", () => {
+  it("accepts Cursor modes and a model name; rejects anything else", async () => {
+    const { composerOptionsFromBody } = await import("../src/agents.js");
+    expect(composerOptionsFromBody({ mode: "Plan", model: "Claude Opus 5.5 Medium" })).toEqual({
+      mode: "Plan",
+      model: "Claude Opus 5.5 Medium",
+    });
+    expect(composerOptionsFromBody({})).toEqual({});
+    expect(() => composerOptionsFromBody({ mode: "Yolo" })).toThrow(/mode must be/);
+    expect(() => composerOptionsFromBody({ model: "x".repeat(81) })).toThrow(/model/);
+  });
+});

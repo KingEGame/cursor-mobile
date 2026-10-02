@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createMockCdpClient } from "./cdp-client.js";
-import { newAgentChat, openAgentChat, sendToAgentChat, stopAgentChat } from "./chat-send.js";
+import { editAgentMessage, newAgentChat, openAgentChat, sendToAgentChat, stopAgentChat } from "./chat-send.js";
 import type { ActionSelector } from "./selector-pack.js";
 
 const TARGET = "466762d6-04ca-46e6-a047-4ad7932ae829";
@@ -19,12 +19,13 @@ const sendSelector: ActionSelector = {
 
 /** Fake Agents window: which chat is open, whether the row exists / is collapsed, and
  * whether a click on the row actually switches the main pane. */
-function fakeCursor(opts: { open: string; rowPresent?: boolean; collapsed?: boolean; clickSwitches?: boolean }) {
+function fakeCursor(opts: { open: string; rowPresent?: boolean; collapsed?: boolean; clickSwitches?: boolean; stuck?: boolean }) {
   let open = opts.open;
   const client = createMockCdpClient({
     "Runtime.evaluate": (params) => {
       const expr = String(params.expression);
       if (expr.includes('querySelector("[data-composer-id]")')) return { result: { value: open } };
+      if (expr.includes("ed ? ed.textContent.trim() : null")) return { result: { value: opts.stuck ? "unsent" : "" } };
       if (expr.includes("present:")) {
         return { result: { value: { present: opts.rowPresent ?? true, collapsed: opts.collapsed ?? false } } };
       }
@@ -87,6 +88,14 @@ describe("sendToAgentChat", () => {
     expect(client.calls.find((c) => c.method === "Input.insertText")?.params).toEqual({ text: "run the tests" });
   });
 
+  it("reports SEND_NOT_CONFIRMED (after trying the Send button) when the text stays put", async () => {
+    const client = fakeCursor({ open: TARGET, stuck: true });
+    const res = await sendToAgentChat(client, TARGET, "hello", sendSelector, { wait: noWait });
+    expect(res).toMatchObject({ ok: false, code: "SEND_NOT_CONFIRMED" });
+    const evals = client.calls.filter((c) => c.method === "Runtime.evaluate").map((c) => String(c.params.expression));
+    expect(evals.some((e) => e.includes("Send message"))).toBe(true);
+  });
+
   it("never types when Cursor did not switch to the chat", async () => {
     const client = fakeCursor({ open: OTHER, clickSwitches: false });
     const res = await sendToAgentChat(client, TARGET, "should not land elsewhere", sendSelector, {
@@ -138,6 +147,7 @@ describe("newAgentChat", () => {
             return { result: { value: true } };
           }
         }
+        if (expr.includes("ed ? ed.textContent.trim() : null")) return { result: { value: "" } };
         if (expr.includes("const known = new Set")) {
           return { result: { value: clicked && opts.opensNewRow !== false ? NEW_ID : null } };
         }
@@ -175,5 +185,47 @@ describe("newAgentChat", () => {
     const client = fakeNewChat({ sectionPresent: false });
     const res = await newAgentChat(client, SECTION, "hello", sendSelector, { wait: noWait });
     expect(res).toMatchObject({ ok: false, code: "PROJECT_NOT_IN_SIDEBAR" });
+  });
+});
+
+describe("editAgentMessage", () => {
+  const BUBBLE = "7acd1e3a-aff1-4e4b-b312-bd23d11684b8";
+  function fakeEdit(opts: { readBack?: string; closes?: boolean } = {}) {
+    let sent = false;
+    const client = createMockCdpClient({
+      "Runtime.evaluate": (params) => {
+        const expr = String(params.expression);
+        if (expr.includes('querySelector("[data-composer-id]")')) return { result: { value: TARGET } };
+        if (expr.includes("e.focus(); return true")) return { result: { value: true } };
+        if (expr.includes("return e ? e.textContent : null")) return { result: { value: opts.readBack ?? "new text" } };
+        if (expr.includes('aria-label="Send message"')) return { result: { value: { x: 1, y: 1 } } };
+        if (expr.includes('querySelector("[contenteditable=true]")))()')) return { result: { value: !(sent && opts.closes !== false) } };
+        return { result: { value: { x: 10, y: 20 } } };
+      },
+      "Input.dispatchMouseEvent": (params) => {
+        if (params.type === "mouseReleased" && params.x === 1) sent = true;
+        return {};
+      },
+    });
+    return client;
+  }
+
+  it("replaces the message text and resubmits it", async () => {
+    const client = fakeEdit();
+    const res = await editAgentMessage(client, TARGET, BUBBLE, "new text", { wait: noWait });
+    expect(res.ok).toBe(true);
+    expect(client.calls.find((c) => c.method === "Input.insertText")?.params).toEqual({ text: "new text" });
+  });
+
+  it("cancels without sending when the text does not read back", async () => {
+    const client = fakeEdit({ readBack: "something else" });
+    const res = await editAgentMessage(client, TARGET, BUBBLE, "new text", { wait: noWait });
+    expect(res).toMatchObject({ ok: false, code: "EDIT_FAILED" });
+    expect(client.calls.some((c) => c.method === "Input.dispatchMouseEvent" && c.params.x === 1)).toBe(false);
+  });
+
+  it("rejects ids that are not Cursor message ids", async () => {
+    const res = await editAgentMessage(fakeEdit(), TARGET, "m_bad", "x", { wait: noWait });
+    expect(res).toMatchObject({ ok: false, code: "MESSAGE_NOT_FOUND" });
   });
 });

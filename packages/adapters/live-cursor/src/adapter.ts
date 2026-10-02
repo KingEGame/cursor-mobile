@@ -1,8 +1,12 @@
+import { listMentionOptions as listMentionOptionsRun, type MentionResult, type MentionTrigger } from "./mentions.js";
 import {
   sendToAgentChat as sendAgentChatMessage,
   stopAgentChat as stopAgentChatRun,
   newAgentChat as newAgentChatRun,
+  editAgentMessage as editAgentMessageRun,
+  openAgentChat as openAgentChatRun,
   type ChatSendResult,
+  type ComposerSendOptions,
 } from "./chat-send.js";
 import {
   scrapeAgentsSidebar,
@@ -898,7 +902,11 @@ export class LiveCursorAdapterImpl implements LiveCursorAdapter {
     }
   }
 
-  async sendToAgentChat(composerId: string, text: string): Promise<ChatSendResult> {
+  async sendToAgentChat(
+    composerId: string,
+    text: string,
+    composer?: ComposerSendOptions,
+  ): Promise<ChatSendResult> {
     const health = await this.getHealth();
     if (health.state === "cursor_down") {
       return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor CDP unreachable", methods: [] };
@@ -932,13 +940,18 @@ export class LiveCursorAdapterImpl implements LiveCursorAdapter {
         composerId,
         text,
         this.selectorPack.pack.actions.send_message,
+        { composer },
       );
     } finally {
       await client.close().catch(() => undefined);
     }
   }
 
-  async newAgentChat(sectionId: string, text: string): Promise<ChatSendResult> {
+  async newAgentChat(
+    sectionId: string,
+    text: string,
+    composer?: ComposerSendOptions,
+  ): Promise<ChatSendResult> {
     const health = await this.getHealth();
     if (health.state === "cursor_down") {
       return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor CDP unreachable", methods: [] };
@@ -967,7 +980,63 @@ export class LiveCursorAdapterImpl implements LiveCursorAdapter {
       };
     }
     try {
-      return await newAgentChatRun(client, sectionId, text, this.selectorPack.pack.actions.send_message);
+      return await newAgentChatRun(client, sectionId, text, this.selectorPack.pack.actions.send_message, {
+        composer,
+      });
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
+  async editAgentMessage(composerId: string, bubbleId: string, text: string): Promise<ChatSendResult> {
+    const health = await this.getHealth();
+    if (health.state === "cursor_down") {
+      return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor CDP unreachable", methods: [] };
+    }
+    const debuggerUrl = this.resolveDebuggerUrl();
+    if (!debuggerUrl) {
+      return { ok: false, code: "CDP_INPUT_FAILED", error: "No loopback CDP debugger URL", methods: [] };
+    }
+    let client;
+    try {
+      client = await this.cdpClientFactory(debuggerUrl);
+    } catch (err) {
+      return {
+        ok: false,
+        code: "CDP_INPUT_FAILED",
+        error: err instanceof Error ? err.message : "Failed to open CDP session",
+        methods: [],
+      };
+    }
+    try {
+      return await editAgentMessageRun(client, composerId, bubbleId, text);
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
+  async listAgentMentions(
+    composerId: string,
+    trigger: MentionTrigger,
+    query: string,
+  ): Promise<MentionResult> {
+    const health = await this.getHealth();
+    if (health.state === "cursor_down") {
+      return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor CDP unreachable" };
+    }
+    const debuggerUrl = this.resolveDebuggerUrl();
+    if (!debuggerUrl) return { ok: false, code: "CDP_INPUT_FAILED", error: "No loopback CDP debugger URL" };
+    let client;
+    try {
+      client = await this.cdpClientFactory(debuggerUrl);
+    } catch (err) {
+      return { ok: false, code: "CDP_INPUT_FAILED", error: err instanceof Error ? err.message : "CDP session failed" };
+    }
+    try {
+      // Files are project-scoped: list from the chat the phone is in.
+      const opened = await openAgentChatRun(client, composerId);
+      if (!opened.ok) return { ok: false, code: "CDP_INPUT_FAILED", error: opened.error };
+      return await listMentionOptionsRun(client, trigger, query);
     } finally {
       await client.close().catch(() => undefined);
     }
@@ -1599,6 +1668,23 @@ export function createMockLiveCursorAdapter(
       }
       sentToAgentChats.push({ composerId: `new:${sectionId}`, text });
       return { ok: true, switched: true, methods: ["Runtime.evaluate"], composerId: "00000000-0000-4000-8000-000000000001" };
+    },
+    async editAgentMessage(composerId, bubbleId, text) {
+      if (healthState !== "cdp_ok") {
+        return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor down", methods: [] };
+      }
+      sentToAgentChats.push({ composerId: `edit:${composerId}:${bubbleId}`, text });
+      return { ok: true, switched: false, methods: ["Input.insertText"] };
+    },
+    async listAgentMentions(_composerId, trigger) {
+      if (healthState !== "cdp_ok") return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor down" };
+      return {
+        ok: true,
+        options:
+          trigger === "@"
+            ? [{ label: "AGENTS.md", detail: "", hint: "" }]
+            : [{ label: "goal", detail: "Set a goal", hint: "" }],
+      };
     },
     async stopAgentChat(composerId) {
       if (healthState !== "cdp_ok") {

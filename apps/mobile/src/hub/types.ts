@@ -538,3 +538,34 @@ export interface ChatFileChange {
 export interface ChatFileDiff extends ChatFileChange {
   hunks: Array<{ oldStart: number; newStart: number; lines: string[] }>;
 }
+
+/** Cursor composer modes offered by the Agents-window "+" list. */
+export type AgentMode = 'Plan' | 'Debug' | 'Multitask' | 'Ask';
+
+/** "@" files / plugins or "/" skills, inserted as Cursor chips. */
+export interface MentionRef {
+  trigger: '@' | '/';
+  label: string;
+  detail?: string;
+}
+
+/** GET /v1/agents/chats/:id/mentions — what Cursor offers for "@q" / "/q". */
+export interface MentionOption {
+  label: string;
+  detail: string;
+  hint: string;
+}
+
+export interface PhonePhoto {
+  name: string;
+  mime: 'image/jpeg' | 'image/png' | 'image/webp';
+  base64: string;
+}
+
+/** Optional composer settings sent with a message (applied and verified on the PC). */
+export interface ComposerOptions {
+  mode?: AgentMode | null;
+  model?: string | null;
+  mentions?: MentionRef[];
+  images?: PhonePhoto[];
+}

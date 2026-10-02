@@ -31,6 +31,8 @@ import {
   type AgentsResponse,
   type ChatFileChange,
   type ChatFileDiff,
+  type ComposerOptions,
+  type MentionOption,
   isQueuedCreateSession,
 } from './types';
 
@@ -289,12 +291,35 @@ export class HubClient {
   async sendToAgentChat(
     composerId: string,
     text: string,
+    options?: ComposerOptions,
   ): Promise<{ ok: true; composerId: string; switchedOnPc: boolean }> {
     return this.request('POST', `/v1/agents/chats/${encodeURIComponent(composerId)}/messages`, {
       auth: true,
-      body: { text },
+      body: { text, ...options },
     });
   }
+
+  /** PUT /v1/agents/chats/:id/messages/:messageId — edit an earlier message and resubmit. */
+  async editAgentMessage(composerId: string, messageId: string, text: string): Promise<{ ok: true }> {
+    return this.request(
+      'PUT',
+      `/v1/agents/chats/${encodeURIComponent(composerId)}/messages/${encodeURIComponent(messageId)}`,
+      { auth: true, body: { text } },
+    );
+  }
+
+  /** GET /v1/agents/chats/:id/mentions — Cursor's "@" / "/" options for a query. */
+  async listChatMentions(
+    composerId: string,
+    trigger: '@' | '/',
+    q: string,
+  ): Promise<{ options: MentionOption[] }> {
+    const query = `?trigger=${encodeURIComponent(trigger)}&q=${encodeURIComponent(q)}`;
+    return this.request('GET', `/v1/agents/chats/${encodeURIComponent(composerId)}/mentions${query}`, {
+      auth: true,
+    });
+  }
+
 
   /**
    * POST /v1/agents/projects/new — start a new chat in one sidebar project on the PC and
@@ -303,8 +328,12 @@ export class HubClient {
   async newAgentChat(
     projectId: string,
     text: string,
+    options?: ComposerOptions,
   ): Promise<{ ok: true; composerId: string | null; sessionId: string | null }> {
-    return this.request('POST', '/v1/agents/projects/new', { auth: true, body: { projectId, text } });
+    return this.request('POST', '/v1/agents/projects/new', {
+      auth: true,
+      body: { projectId, text, ...options },
+    });
   }
 
   /** POST /v1/agents/chats/:id/stop — click Stop generation for that chat on the PC. */

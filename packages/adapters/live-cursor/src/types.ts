@@ -1,4 +1,5 @@
-import type { ChatSendResult } from "./chat-send.js";
+import type { MentionResult, MentionTrigger } from "./mentions.js";
+import type { ChatSendResult, ComposerSendOptions } from "./chat-send.js";
 import type { SidebarScrapeResult } from "./sidebar-scrape.js";
 /** Live adapter health triad (TOR-06). */
 export type LiveHealthState = "cdp_ok" | "extractor_stale" | "cursor_down";
@@ -319,11 +320,17 @@ export interface LiveCursorAdapter {
    * Open `composerId` in the PC Agents window (sidebar click, verified switch) and
    * type + submit `text`. Requires send_message VERIFIED; never types into another chat.
    */
-  sendToAgentChat(composerId: string, text: string): Promise<ChatSendResult>;
+  sendToAgentChat(composerId: string, text: string, composer?: ComposerSendOptions): Promise<ChatSendResult>;
 
   /** Open `composerId` on the PC and click Stop generation; NOT_RUNNING when idle. */
   stopAgentChat(composerId: string): Promise<ChatSendResult>;
 
   /** Start a new chat in a sidebar project (verified new active row) and send `text`. */
-  newAgentChat(sectionId: string, text: string): Promise<ChatSendResult>;
+  newAgentChat(sectionId: string, text: string, composer?: ComposerSendOptions): Promise<ChatSendResult>;
+
+  /** Edit one of the operator's earlier messages (by Cursor bubble id) and resubmit it. */
+  editAgentMessage(composerId: string, bubbleId: string, text: string): Promise<ChatSendResult>;
+
+  /** What Cursor offers for "@query" (files, MCP…) or "/query" (skills) in that chat. */
+  listAgentMentions(composerId: string, trigger: MentionTrigger, query: string): Promise<MentionResult>;
 }

@@ -11,6 +11,8 @@ import { createApiRouter } from "./routes/api.js";
 export function createApp(ctx: HubContext): Express {
   const app = express();
   app.disable("x-powered-by");
+  // Agents chat routes may carry phone photos (base64); everything else keeps 256kb.
+  app.use("/v1/agents", express.json({ limit: "12mb" }));
   app.use(express.json({ limit: "256kb" }));
 
   const api = createApiRouter(ctx);

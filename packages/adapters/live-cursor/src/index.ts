@@ -138,8 +138,26 @@ export {
   openAgentChat,
   readOpenChatId,
   sendToAgentChat,
+  clearComposer,
+  confirmSubmitted,
+  editAgentMessage,
   newAgentChat,
   STOP_GENERATION_SELECTORS,
   stopAgentChat,
 } from "./chat-send.js";
 export type { ChatSendResult } from "./chat-send.js";
+
+export {
+  AGENT_MODES,
+  applyComposerOptions,
+  normalizeModelLabel,
+  readComposerState,
+} from "./composer-options.js";
+export type { AgentMode, ComposerOptionsResult } from "./composer-options.js";
+export type { ComposerSendOptions } from "./chat-send.js";
+
+export { insertMention, insertMentions, listMentionOptions, optionMatches } from "./mentions.js";
+export type { MentionOption, MentionRef, MentionResult, MentionTrigger } from "./mentions.js";
+
+export { pasteImages, removePastedImages } from "./images.js";
+export type { PastedImage, PasteResult } from "./images.js";

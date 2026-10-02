@@ -7,12 +7,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Check, Folder } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ChatComposer, type ComposerSubmit } from '../composer/ChatComposer';
 import { createHubClient } from '../hub/client';
 import { HubApiError, type AgentsProjectRow } from '../hub/types';
 import type { RootStackParamList } from '../navigation/types';
@@ -31,7 +31,6 @@ export function NewAgentChatScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const [projects, setProjects] = useState<AgentsProjectRow[] | null>(null);
   const [projectId, setProjectId] = useState<string | null>(route.params?.projectId ?? null);
-  const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,25 +53,26 @@ export function NewAgentChatScreen({ navigation, route }: Props) {
       .catch(() => setError('Could not load projects from the PC'));
   }, [client]);
 
-  const create = async () => {
-    const message = text.trim();
-    if (!client || !projectId || !message || sending) return;
+  const create = async ({ text, options }: ComposerSubmit): Promise<boolean> => {
+    if (!client || !projectId || sending) return false;
     setSending(true);
     setError(null);
     try {
       const { lockSend } = await loadLockSettings();
       if (!(await unlock(lockSend, 'Unlock to start a chat on your PC'))) {
         setError('Not sent — unlock was cancelled');
-        return;
+        return false;
       }
-      const res = await client.newAgentChat(projectId, message);
+      const res = await client.newAgentChat(projectId, text, options);
       if (res.sessionId) {
-        navigation.replace('HistoryRead', { sessionId: res.sessionId, title: message.slice(0, 60) });
+        navigation.replace('HistoryRead', { sessionId: res.sessionId, title: text.slice(0, 60) });
       } else {
         navigation.goBack();
       }
+      return true;
     } catch (err) {
       setError(err instanceof HubApiError ? `Not started — ${err.message}` : 'Not started — check the connection');
+      return false;
     } finally {
       setSending(false);
     }
@@ -106,29 +106,15 @@ export function NewAgentChatScreen({ navigation, route }: Props) {
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
 
-      <View style={[styles.composer, { paddingBottom: spacing.sm + insets.bottom }]}>
-        <TextInput
-          value={text}
-          onChangeText={setText}
-          placeholder={chosen ? `Ask the agent in ${chosen.name}` : 'Message the agent'}
-          placeholderTextColor={colors.muted}
-          style={styles.input}
-          multiline
-          autoFocus
-          accessibilityLabel="First message"
-          testID="new-chat-input"
-        />
-        <Pressable
-          onPress={() => void create()}
-          disabled={!text.trim() || !projectId || sending}
-          style={[styles.send, (!text.trim() || !projectId || sending) && styles.sendDisabled]}
-          accessibilityRole="button"
-          accessibilityLabel="Start chat"
-          testID="new-chat-send"
-        >
-          {sending ? <ActivityIndicator color={colors.accentText} /> : <Text style={styles.sendText}>Start</Text>}
-        </Pressable>
-      </View>
+      <ChatComposer
+        client={client}
+        composerId={null}
+        running={false}
+        busy={sending || !projectId}
+        bottomInset={insets.bottom}
+        placeholder={chosen ? `Ask the agent in ${chosen.name}` : 'Message the agent'}
+        onSubmit={create}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -148,36 +134,4 @@ const styles = StyleSheet.create({
   projectSelected: { backgroundColor: colors.surfaceMuted },
   projectName: { flex: 1, color: colors.text, fontSize: 16 },
   error: { color: colors.danger, marginTop: spacing.sm },
-  composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    backgroundColor: colors.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-  },
-  input: {
-    flex: 1,
-    minHeight: 44,
-    maxHeight: 160,
-    borderRadius: radii.md,
-    backgroundColor: colors.surfaceMuted,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
-    color: colors.text,
-    fontSize: 16,
-  },
-  send: {
-    minHeight: 44,
-    minWidth: 72,
-    borderRadius: radii.pill,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  sendDisabled: { backgroundColor: colors.border },
-  sendText: { color: colors.accentText, fontWeight: '700', fontSize: 16 },
 });

@@ -45,6 +45,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Hub speaks HTTP on Tailscale (PC-local mesh); Expo ignores
       // android.usesCleartextTraffic, so the manifest flag comes from this plugin.
       './plugins/with-cleartext-hub',
+      // Camera / gallery photos attached to a PC Cursor chat (pasted by the Hub).
+      [
+        'expo-image-picker',
+        {
+          cameraPermission: 'Take a photo to attach to a Cursor chat on your PC.',
+          photosPermission: 'Choose a photo to attach to a Cursor chat on your PC.',
+          microphonePermission: false,
+        },
+      ],
     ],
     extra: {
       ...config.extra,
