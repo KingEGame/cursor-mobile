@@ -45,11 +45,11 @@ Note: the hook tests the **working tree**; CI tests the pushed commit only.
 
 - **android-apk** (node1): prebuild --clean + `assembleRelease`, `latest.json` via `publish-apk-to-hub.mjs --manifest-only`. Tag must equal `apps/mobile/app.json` version.
 - **hub-desktop-linux** (node1): `node scripts/package-desktop.mjs --platform linux` → AppImage
-- **hub-desktop-win** (`windows-latest`): `--platform win` → portable `.exe` (build-only; never runs Hub sync)
+- **hub-desktop-win** (node1): `--platform win` → portable `.exe` (cross-built on Linux)
 - **hub-desktop-mac** (`macos-latest`): `--platform mac` → unsigned zip x64 + arm64
 - **release:** attaches APK + `latest.json` + all Hub desktop artifacts + combined `SHA256SUMS.txt`
 
-**Runners:** gate / android-apk / hub-desktop-linux / release on **node1** (self-hosted). Win/mac Hub packaging on GitHub-hosted OS runners — artifact build only; product locks still require Hub to run on the operator PC.
+**Runners:** gate / android-apk / hub-desktop-linux / hub-desktop-win / release on **node1**. mac Hub packaging on GitHub-hosted `macos-latest` — artifact build only; product locks still require Hub to run on the operator PC.
 Provisioned without sudo by `bash scripts/ci/install-node1-runner.sh` from the PC: JDK 17 +
 Android cmdline-tools under `~/ci`, `gh` in `~/.local/bin`, runner in `~/actions-runner` as the
 `github-runner` systemd --user service (linger on).

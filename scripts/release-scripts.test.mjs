@@ -106,10 +106,10 @@ describe("hook + CI wiring", () => {
     assert.match(ci, /concurrency:\s*\n\s*group: ci-\$\{\{ github\.ref \}\}/);
     assert.match(ci, /cancel-in-progress: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/);
   });
-  it("CI jobs for gate/apk/linux-desktop run on node1; win/mac use GitHub-hosted", () => {
+  it("CI jobs for gate/apk/desktop run on node1; mac uses GitHub-hosted", () => {
     const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
     assert.match(ci, /hub-desktop-linux:[\s\S]*?runs-on: \[self-hosted, node1\]/);
-    assert.match(ci, /hub-desktop-win:[\s\S]*?runs-on: windows-latest/);
+    assert.match(ci, /hub-desktop-win:[\s\S]*?runs-on: \[self-hosted, node1\]/);
     assert.match(ci, /hub-desktop-mac:[\s\S]*?runs-on: macos-latest/);
     assert.match(ci, /android-apk:[\s\S]*?runs-on: \[self-hosted, node1\]/);
   });

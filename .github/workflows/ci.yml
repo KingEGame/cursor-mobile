@@ -1,8 +1,8 @@
 # Same release gate as the PC pre-push hook, on a clean checkout.
 # gate → android-apk + hub-desktop-{linux,win,mac} → release (tags v*).
-# Android + gate + linux Hub stay on node1 (self-hosted).
-# Windows/macOS Hub builds use GitHub-hosted runners (build/test only — never run Hub sync).
-# The phone never downloads from here directly: on the PC run
+# Android + gate + linux/win Hub stay on node1 (self-hosted).
+# macOS Hub builds use GitHub-hosted macos-latest (build only — never run Hub sync).
+# Windows portable .exe is cross-built on node1 via electron-builder.# The phone never downloads from here directly: on the PC run
 #   npm run publish:apk:github
 # and the Hub serves that release over Tailscale (product lock: PC-local sync).
 name: CI
@@ -154,7 +154,9 @@ jobs:
   hub-desktop-win:
     name: hub-desktop (windows portable exe)
     needs: gate
-    runs-on: windows-latest
+    # Cross-build on node1 (Linux) — portable exe works via electron-builder without
+    # a Windows runner, and avoids win32 npm.cmd spawn EINVAL under Actions.
+    runs-on: [self-hosted, node1]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -166,7 +168,6 @@ jobs:
 
       - name: Tag matches desktop version
         if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
         run: |
           desk="$(node -p "require('./apps/desktop/package.json').version")"
           if [ "v$desk" != "${GITHUB_REF_NAME}" ]; then
@@ -175,8 +176,7 @@ jobs:
           fi
 
       - name: Package Windows Hub desktop
-        shell: cmd
-        run: node scripts\package-desktop.mjs --platform win
+        run: node scripts/package-desktop.mjs --platform win
 
       - uses: actions/upload-artifact@v4
         with:

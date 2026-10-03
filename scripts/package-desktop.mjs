@@ -144,7 +144,14 @@ export function listReleaseArtifacts(dir) {
 }
 
 function run(cmd, args, opts = {}) {
-  execFileSync(cmd, args, { stdio: "inherit", cwd: root, ...opts });
+  // On Windows, .cmd shims (npm.cmd / npx.cmd) require shell:true; bare execFile
+  // yields ENOENT or EINVAL on GitHub-hosted runners.
+  execFileSync(cmd, args, {
+    stdio: "inherit",
+    cwd: root,
+    shell: process.platform === "win32",
+    ...opts,
+  });
 }
 
 /** Windows GitHub runners need npm.cmd / npx.cmd (ENOENT for bare `npm` under bash). */
