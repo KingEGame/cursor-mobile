@@ -147,9 +147,18 @@ function run(cmd, args, opts = {}) {
   execFileSync(cmd, args, { stdio: "inherit", cwd: root, ...opts });
 }
 
+/** Windows GitHub runners need npm.cmd / npx.cmd (ENOENT for bare `npm` under bash). */
+export function npmCmd() {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+export function npxCmd() {
+  return process.platform === "win32" ? "npx.cmd" : "npx";
+}
+
 function ensureBuild() {
   console.log("[package-desktop] building packages…");
-  run("npm", ["run", "build"]);
+  run(npmCmd(), ["run", "build"]);
 }
 
 function bundleHub() {
@@ -260,7 +269,7 @@ function buildPlatform(platform) {
     }
   }
 
-  run("npx", args, { env: builderEnv() });
+  run(npxCmd(), args, { env: builderEnv() });
 }
 
 async function main() {
@@ -272,7 +281,7 @@ async function main() {
     return;
   }
 
-  run("npm", ["install", "-w", "@cursor-mobile/desktop", "--no-fund", "--no-audit"]);
+  run(npmCmd(), ["install", "-w", "@cursor-mobile/desktop", "--no-fund", "--no-audit"]);
 
   for (const platform of platforms) {
     buildPlatform(platform);

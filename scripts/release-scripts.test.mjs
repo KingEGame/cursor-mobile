@@ -138,6 +138,8 @@ describe("package-desktop naming + checksums", () => {
       parsePlatforms,
       expectedArtifactsFor,
       writeSha256Sums,
+      npmCmd,
+      npxCmd,
     } = await import("./package-desktop.mjs");
     assert.equal(
       desktopLinuxArtifactName("0.1.1"),
@@ -152,6 +154,9 @@ describe("package-desktop naming + checksums", () => {
     assert.deepEqual(expectedArtifactsFor("win", "0.1.1"), [
       "cursor-mobile-hub-0.1.1-win-x64.exe",
     ]);
+    // Windows runners resolve npm/npx via .cmd (CI failure was ENOENT on bare `npm`).
+    assert.equal(typeof npmCmd, "function");
+    assert.equal(typeof npxCmd, "function");
     const work = tmp();
     writeFileSync(join(work, "a.bin"), "hello");
     const body = await writeSha256Sums(work, ["a.bin"]);
