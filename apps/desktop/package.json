@@ -1,0 +1,67 @@
+{
+  "name": "@cursor-mobile/desktop",
+  "version": "0.1.1",
+  "private": true,
+  "description": "PC-local Cursor companion Hub — desktop shell (Electron)",
+  "author": "cursor-mobile",
+  "main": "main.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "pack:linux": "electron-builder --linux AppImage --x64 --publish never",
+    "pack:win": "electron-builder --win portable --x64 --publish never",
+    "pack:mac": "electron-builder --mac zip --x64 --arm64 --publish never"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "37.10.3",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "local.cursor.mobile.hub",
+    "productName": "Cursor Mobile Hub",
+    "executableName": "cursor-mobile-hub",
+    "copyright": "UNLICENSED",
+    "electronVersion": "37.10.3",
+    "directories": {
+      "output": "../../dist-desktop"
+    },
+    "files": [
+      "main.mjs",
+      "preload.cjs",
+      "renderer/**/*",
+      "vendor/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "main.mjs",
+      "name": "cursor-mobile-hub"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Network",
+      "artifactName": "cursor-mobile-hub-${version}-linux-x64.${ext}",
+      "synopsis": "PC-local Hub for the Cursor Mobile companion APK",
+      "description": "Runs the Hub on this PC (Tailscale + pairing). Phone is UI only; CDP stays on 127.0.0.1."
+    },
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "artifactName": "cursor-mobile-hub-${version}-win-${arch}.${ext}",
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": [
+        "zip"
+      ],
+      "artifactName": "cursor-mobile-hub-${version}-darwin-${arch}.${ext}",
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "gatekeeperAssess": false
+    },
+    "asar": true
+  }
+}

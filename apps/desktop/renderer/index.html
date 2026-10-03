@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cursor Mobile Hub</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Cursor Mobile Hub</h1>
+        <p class="sub">PC-local only · Tailscale + pair · CDP on 127.0.0.1</p>
+      </header>
+
+      <section class="card" aria-live="polite">
+        <div class="row">
+          <span class="label">Hub</span>
+          <span id="hubState" class="value">Starting…</span>
+        </div>
+        <div class="row">
+          <span class="label">Listen</span>
+          <span id="listen" class="value mono">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Tailscale</span>
+          <span id="tailscale" class="value mono">—</span>
+        </div>
+        <div class="row">
+          <span class="label">CDP</span>
+          <span id="cdp" class="value mono">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Workspace</span>
+          <span id="workspace" class="value mono">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Live adapter</span>
+          <span id="live" class="value">—</span>
+        </div>
+        <p id="error" class="error" hidden></p>
+      </section>
+
+      <section class="actions">
+        <button type="button" id="btnPair">Open pair QR</button>
+        <button type="button" id="btnHealth" class="secondary">Open /health</button>
+        <button type="button" id="btnRefresh" class="secondary">Refresh</button>
+      </section>
+
+      <p class="hint">
+        On the phone: join the same Tailscale mesh, install the companion APK, then Scan QR.
+        The phone never dials CDP.
+      </p>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>

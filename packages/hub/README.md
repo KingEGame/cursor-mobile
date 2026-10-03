@@ -58,12 +58,33 @@ flowchart LR
 
 ## Run
 
+### Packaged desktop
+
+Download from the GitHub Release:
+
+| OS | Artifact |
+|----|----------|
+| Linux | `cursor-mobile-hub-*-linux-x64.AppImage` |
+| Windows | `cursor-mobile-hub-*-win-x64.exe` |
+| macOS | `cursor-mobile-hub-*-darwin-arm64.zip` or `…-darwin-x64.zip` |
+
+From source (same pipeline):
+
+```bash
+node scripts/package-desktop.mjs --platform linux   # or win / mac
+# → dist-desktop/
+```
+
+### From source (CLI)
+
 From repo root:
 
 ```bash
 npm install
 npm run build
 npm run start
+# Tailscale-friendly bind:
+npm run start:hub:tailscale
 ```
 
 Dev (tsx, no prior build):

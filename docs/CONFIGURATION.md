@@ -28,6 +28,22 @@
 | `WORKSPACE_POLL_MS` | Optional | TBD | Refresh interval for live workspace detect | DESIGNED |
 | `EXPO_PUBLIC_HUB_URL` | Optional (APK) | — | **Build-time default only** (baked into `extra.hubUrl`). Pair screen always accepts a runtime Hub URL and persists it in SecureStore — **rebuild not required** to point at Tailscale Hub. This PC (2026-09-30): `http://100.108.160.99:8787` / MagicDNS `http://kingwarpc-1.tail246b3f.ts.net:8787` (legacy `100.91.47.68` / `kingwarpc…` may be offline) | Phase 0 (`apps/mobile`) |
 
+## Desktop Hub (Electron)
+
+Packaged Hub UI (`apps/desktop`). Same env knobs as the CLI Hub. Runs **on the operator PC only**.
+
+| Item | Notes |
+|------|--------|
+| Linux | `cursor-mobile-hub-<version>-linux-x64.AppImage` |
+| Windows | `cursor-mobile-hub-<version>-win-x64.exe` (portable) |
+| macOS | `cursor-mobile-hub-<version>-darwin-arm64.zip` / `…-darwin-x64.zip` |
+| Checksums | `SHA256SUMS.txt` on the GitHub Release |
+| Local package | `node scripts/package-desktop.mjs --platform linux\|win\|mac` → `dist-desktop/` |
+| Dev shell | `npm run start:desktop` |
+| Defaults | `HUB_HOST=0.0.0.0`, `HUB_PORT=8787`, `CDP_URL=http://127.0.0.1:9222`, `HUB_DATA_DIR=~/.cursor-mobile/hub-data` |
+| Signing | Unsigned desktop binaries in v1 (SmartScreen / Gatekeeper may warn) |
+| Product locks | Phone downloads APK from Hub over Tailscale (`publish:apk:github`), not from GitHub |
+
 ```mermaid
 flowchart TB
   subgraph Phone

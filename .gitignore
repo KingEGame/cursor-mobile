@@ -16,3 +16,12 @@ packages/hub/data/
 # Expo native modules: Gradle build output
 apps/mobile/modules/*/android/build/
 apps/mobile/modules/*/android/.cxx/
+
+# Desktop packaging outputs (generated)
+dist-desktop/
+dist-apk/
+apps/desktop/vendor/hub-bundle.mjs
+apps/desktop/vendor/hub-bundle.mjs.map
+apps/desktop/vendor/hub-bundle.cjs
+apps/desktop/vendor/hub-bundle.cjs.map
+

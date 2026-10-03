@@ -106,11 +106,67 @@ describe("hook + CI wiring", () => {
     assert.match(ci, /concurrency:\s*\n\s*group: ci-\$\{\{ github\.ref \}\}/);
     assert.match(ci, /cancel-in-progress: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/);
   });
-  it("CI jobs all run on the node1 self-hosted runner", () => {
+  it("CI jobs for gate/apk/linux-desktop run on node1; win/mac use GitHub-hosted", () => {
     const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
-    const runsOn = ci.match(/runs-on: .*/g) ?? [];
-    assert.ok(runsOn.length >= 3);
-    for (const r of runsOn) assert.equal(r, "runs-on: [self-hosted, node1]");
+    assert.match(ci, /hub-desktop-linux:[\s\S]*?runs-on: \[self-hosted, node1\]/);
+    assert.match(ci, /hub-desktop-win:[\s\S]*?runs-on: windows-latest/);
+    assert.match(ci, /hub-desktop-mac:[\s\S]*?runs-on: macos-latest/);
+    assert.match(ci, /android-apk:[\s\S]*?runs-on: \[self-hosted, node1\]/);
+  });
+  it("CI builds hub-desktop for linux/win/mac and attaches all on tag release", () => {
+    const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+    assert.match(ci, /hub-desktop-linux:/);
+    assert.match(ci, /hub-desktop-win:/);
+    assert.match(ci, /hub-desktop-mac:/);
+    assert.match(ci, /--platform linux/);
+    assert.match(ci, /--platform win/);
+    assert.match(ci, /--platform mac/);
+    assert.match(
+      ci,
+      /needs: \[gate, android-apk, hub-desktop-linux, hub-desktop-win, hub-desktop-mac\]/,
+    );
+    assert.match(ci, /dist-desktop\/\*/);
+  });
+});
+
+describe("package-desktop naming + checksums", () => {
+  it("artifact names cover linux AppImage, win exe, mac zip", async () => {
+    const {
+      desktopLinuxArtifactName,
+      desktopWinArtifactName,
+      desktopMacArtifactName,
+      parsePlatforms,
+      expectedArtifactsFor,
+      writeSha256Sums,
+    } = await import("./package-desktop.mjs");
+    assert.equal(
+      desktopLinuxArtifactName("0.1.1"),
+      "cursor-mobile-hub-0.1.1-linux-x64.AppImage",
+    );
+    assert.equal(desktopWinArtifactName("v0.1.1"), "cursor-mobile-hub-0.1.1-win-x64.exe");
+    assert.equal(
+      desktopMacArtifactName("0.1.1", "arm64"),
+      "cursor-mobile-hub-0.1.1-darwin-arm64.zip",
+    );
+    assert.deepEqual(parsePlatforms(["--platform", "all"]), ["linux", "win", "mac"]);
+    assert.deepEqual(expectedArtifactsFor("win", "0.1.1"), [
+      "cursor-mobile-hub-0.1.1-win-x64.exe",
+    ]);
+    const work = tmp();
+    writeFileSync(join(work, "a.bin"), "hello");
+    const body = await writeSha256Sums(work, ["a.bin"]);
+    assert.match(body, /^[0-9a-f]{64} {2}a\.bin\n$/);
+    assert.ok(existsSync(join(work, "SHA256SUMS.txt")));
+  });
+  it("desktop package and packaging script exist", () => {
+    assert.ok(existsSync(join(root, "apps/desktop/package.json")));
+    assert.ok(existsSync(join(root, "apps/desktop/main.mjs")));
+    assert.ok(existsSync(join(root, "scripts/package-desktop.mjs")));
+    const desk = JSON.parse(readFileSync(join(root, "apps/desktop/package.json"), "utf8"));
+    assert.equal(desk.name, "@cursor-mobile/desktop");
+    assert.match(JSON.stringify(desk.build?.linux ?? {}), /AppImage/);
+    assert.match(JSON.stringify(desk.build?.win ?? {}), /portable/);
+    assert.match(JSON.stringify(desk.build?.mac ?? {}), /zip/);
   });
 });
 

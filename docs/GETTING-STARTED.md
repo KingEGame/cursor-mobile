@@ -1,7 +1,7 @@
 <!-- generated-by: gsd-doc-writer -->
 # Getting started
 
-**Status:** Operator path for Phase 0–1 scaffold — Hub + Expo APK packages exist; live E2E still gated on CDP/UAT.
+**Status:** Operator path — download Hub desktop (Linux) + APK from GitHub Releases, or build from source. Live E2E still gated on CDP/UAT.
 
 ## Prerequisites
 
@@ -10,21 +10,41 @@
 | Cursor IDE on a PC | Project must be opened on the PC before the phone can work in it |
 | Tailscale | PC and phone on the same tailnet; Hub stays private (no public CDP). Already installed on this operator setup |
 | Chrome DevTools Protocol (CDP) | Launch via `./scripts/start-cursor-cdp.sh` (default `127.0.0.1:9222`, loopback only) |
-| Android device | Sideload APK (local `assembleRelease` or Expo EAS `apk` profile) |
-| Hub process | Local service on the PC — `packages/hub` via `./scripts/start-hub-tailscale.sh` |
+| Android device | Sideload APK from GitHub Release or local `assembleRelease` |
+| Hub on the PC | Download Hub desktop from GitHub Release: Linux AppImage, Windows portable `.exe`, or macOS zip. Or run from source: `npm run start:hub:tailscale` |
 
-## Installation steps (planned)
+## Installation steps
 
-When the scaffold lands, the flow is expected to be:
+1. On the **PC**, download the latest GitHub Release for this repo (`v*` tag).
+2. Install / run the **Hub desktop** for your OS:
+   - Linux: `cursor-mobile-hub-*-linux-x64.AppImage` (`chmod +x`, then run)
+   - Windows: `cursor-mobile-hub-*-win-x64.exe` (portable; SmartScreen may warn — unsigned in v1)
+   - macOS: `cursor-mobile-hub-*-darwin-arm64.zip` or `…-darwin-x64.zip` (unsigned — right-click Open the first time)
+   - Or from source: `npm install && npm run start:hub:tailscale`
+3. Launch Cursor with CDP (loopback only) and open your project.
+4. On the phone, install the signed **APK** from the same Release (or after `npm run publish:apk:github` so the Hub feed serves it).
+5. Join Tailscale on the phone, open the companion app, Scan QR (Hub → Open pair QR).
 
-1. Clone this repository (or install published Hub/APK artifacts when available).
-2. Install Hub dependencies and start the Hub (exact package manager TBD when `package.json` exists).
-3. Build or download the Android APK via Expo EAS with an **APK** (not AAB-only) profile.
-4. Sideload the APK onto the phone.
+```mermaid
+sequenceDiagram
+  participant Op as Operator
+  participant Rel as GitHub Release
+  participant TS as Tailscale
+  participant Cur as Cursor on PC
+  participant Hub as Hub desktop
+  participant APK as Android APK
 
-Exact clone URL and package commands will be filled in when source packages exist.
+  Op->>Rel: Download Hub (AppImage/exe/zip) + APK
+  Op->>TS: Install and join same tailnet
+  Op->>Cur: Launch with CDP + open project
+  Op->>Hub: Run Hub desktop on PC
+  Op->>APK: Sideload APK and Scan QR
+  APK->>Hub: GET /workspace over Tailscale
+  Hub-->>APK: Active project banner
+  Op->>APK: Continue or create session
+```
 
-## First run (planned operator path)
+## First run (operator path)
 
 ```mermaid
 sequenceDiagram

@@ -12,10 +12,11 @@ flowchart LR
   push["git push"] --> gate["pre-push: release gate (PC)"]
   gate -->|red| stop["push blocked"]
   gate -->|green| gh["GitHub Actions: same gate on clean runner"]
-  gh -->|green + tag v*| rel["GitHub Release: APK + latest.json"]
+  gh -->|green + tag v*| rel["GitHub Release: APK + latest.json + Hub linux/win/mac"]
   local["npm run release:apk (PC)"] --> feed
   rel -->|"npm run publish:apk:github (PC)"| feed["Hub feed packages/hub/data/releases"]
   feed -->|"GET /v1/app/latest · /v1/app/apk (paired)"| phone["Account → Update → Android installer"]
+  rel -->|"operator downloads Hub desktop"| desk["Hub on PC (AppImage / exe / zip)"]
 ```
 
 ## 1. Release gate (`npm run gate`)
@@ -40,29 +41,33 @@ Note: the hook tests the **working tree**; CI tests the pushed commit only.
 
 ## 2. CI (`.github/workflows/ci.yml`)
 
-`gate` → `android-apk` (`needs: gate`; prebuild --clean + `assembleRelease`, `latest.json` via
-`publish-apk-to-hub.mjs --manifest-only`) → `release` (tags `v*` only; tag must equal
-`apps/mobile/app.json` version).
+`gate` → `android-apk` + `hub-desktop-linux` + `hub-desktop-win` + `hub-desktop-mac` → `release` (tags `v*` only).
 
-**Runner: node1** (self-hosted, labels `node1`, `android`; every job has `runs-on: [self-hosted, node1]`).
+- **android-apk** (node1): prebuild --clean + `assembleRelease`, `latest.json` via `publish-apk-to-hub.mjs --manifest-only`. Tag must equal `apps/mobile/app.json` version.
+- **hub-desktop-linux** (node1): `node scripts/package-desktop.mjs --platform linux` → AppImage
+- **hub-desktop-win** (`windows-latest`): `--platform win` → portable `.exe` (build-only; never runs Hub sync)
+- **hub-desktop-mac** (`macos-latest`): `--platform mac` → unsigned zip x64 + arm64
+- **release:** attaches APK + `latest.json` + all Hub desktop artifacts + combined `SHA256SUMS.txt`
+
+**Runners:** gate / android-apk / hub-desktop-linux / release on **node1** (self-hosted). Win/mac Hub packaging on GitHub-hosted OS runners — artifact build only; product locks still require Hub to run on the operator PC.
 Provisioned without sudo by `bash scripts/ci/install-node1-runner.sh` from the PC: JDK 17 +
 Android cmdline-tools under `~/ci`, `gh` in `~/.local/bin`, runner in `~/actions-runner` as the
-`github-runner` systemd --user service (linger on). node1 only builds and tests — the Hub and
-all sync stay on the operator PC.
+`github-runner` systemd --user service (linger on).
 
 Repo setup the operator does once:
 
 1. Done 2026-10-02: private repo `KingEGame/cursor-mobile` (`origin`), runner node1 online.
-2. Branch protection on `main`: require `gate` and `android-apk`.
+2. Branch protection on `main`: require `gate`, `android-apk`, and hub-desktop-* jobs.
 3. Optional signing secrets: `CM_KEYSTORE_BASE64`, `CM_KEYSTORE_PASSWORD`, `CM_KEY_ALIAS`, `CM_KEY_PASSWORD`.
 
 ## 3. Versioning + signing
 
-- `apps/mobile/app.json` `expo.version` is the only version to bump.
-  `versionCode = major*10000 + minor*100 + patch` (`app.config.ts`, mirrored in the publish script).
+- Bump **both** `apps/mobile/app.json` `expo.version` and `apps/desktop/package.json` `version` to the same `x.y.z` before tagging `vx.y.z`.
+  Mobile `versionCode = major*10000 + minor*100 + patch` (`app.config.ts`, mirrored in the publish script).
 - `plugins/with-release-signing.js` signs release builds with `CM_KEYSTORE_*` when set, else the
   RN template debug key. **The APK on the Pixel today uses that public debug key**, so updates
   install over it. Switching to a private key requires one uninstall → install → re-pair.
+- Desktop binaries are **unsigned** in v1 (no Authenticode / Apple notarization yet). Windows SmartScreen and macOS Gatekeeper may warn.
 
 ## 4. Hub feed (PC-local)
 

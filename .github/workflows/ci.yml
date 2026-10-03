@@ -1,9 +1,7 @@
 # Same release gate as the PC pre-push hook, on a clean checkout.
-# gate → android-apk (needs gate) → release (tags v*, needs both).
-# Runs on node1 (self-hosted runner, labels: node1, android) — set up with
-#   bash scripts/ci/install-node1-runner.sh
-# node1 provides JDK 17 + Android SDK via ~/actions-runner/.env. It is
-# build/test infrastructure only and never runs the Hub or any sync.
+# gate → android-apk + hub-desktop-{linux,win,mac} → release (tags v*).
+# Android + gate + linux Hub stay on node1 (self-hosted).
+# Windows/macOS Hub builds use GitHub-hosted runners (build/test only — never run Hub sync).
 # The phone never downloads from here directly: on the PC run
 #   npm run publish:apk:github
 # and the Hub serves that release over Tailscale (product lock: PC-local sync).
@@ -119,23 +117,154 @@ jobs:
           path: dist-apk/
           retention-days: 30
 
+  hub-desktop-linux:
+    name: hub-desktop (linux AppImage)
+    needs: gate
+    runs-on: [self-hosted, node1]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Tag matches desktop version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          desk="$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "v$desk" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} but apps/desktop/package.json version is $desk"
+            exit 1
+          fi
+
+      - name: Package Linux Hub desktop
+        run: node scripts/package-desktop.mjs --platform linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hub-desktop-linux
+          path: |
+            dist-desktop/*.AppImage
+            dist-desktop/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  hub-desktop-win:
+    name: hub-desktop (windows portable exe)
+    needs: gate
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Tag matches desktop version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          desk="$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "v$desk" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} but apps/desktop/package.json version is $desk"
+            exit 1
+          fi
+
+      - name: Package Windows Hub desktop
+        shell: bash
+        run: node scripts/package-desktop.mjs --platform win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hub-desktop-win
+          path: |
+            dist-desktop/*.exe
+            dist-desktop/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  hub-desktop-mac:
+    name: hub-desktop (macOS zip)
+    needs: gate
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Tag matches desktop version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          desk="$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "v$desk" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} but apps/desktop/package.json version is $desk"
+            exit 1
+          fi
+
+      - name: Package macOS Hub desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: node scripts/package-desktop.mjs --platform mac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hub-desktop-mac
+          path: |
+            dist-desktop/*.zip
+            dist-desktop/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
   release:
     name: release (tag)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [gate, android-apk]
+    needs: [gate, android-apk, hub-desktop-linux, hub-desktop-win, hub-desktop-mac]
     runs-on: [self-hosted, node1]
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: android-apk
           path: dist-apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: hub-desktop-linux
+          path: dist-desktop
+      - uses: actions/download-artifact@v4
+        with:
+          name: hub-desktop-win
+          path: dist-desktop
+      - uses: actions/download-artifact@v4
+        with:
+          name: hub-desktop-mac
+          path: dist-desktop
+      - name: Combined SHA256SUMS
+        run: |
+          node --input-type=module -e '
+            import { writeSha256Sums, listReleaseArtifacts } from "./scripts/package-desktop.mjs";
+            const files = listReleaseArtifacts("dist-desktop");
+            if (files.length < 3) {
+              console.error("expected linux+win+mac artifacts, got", files);
+              process.exit(1);
+            }
+            await writeSha256Sums("dist-desktop", files);
+            console.log("SHA256SUMS for", files.join(", "));
+          '
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist-apk/* \
+          gh release create "$GITHUB_REF_NAME" dist-apk/* dist-desktop/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
-            --notes "Gate green · ${{ needs.gate.outputs.tests-passed }} tests · signed APK + latest.json for the PC Hub feed."
+            --notes "Gate green · ${{ needs.gate.outputs.tests-passed }} tests · APK + latest.json (phone via PC Hub) · Hub desktop: Linux AppImage, Windows portable .exe, macOS zip (x64+arm64). Unsigned desktop binaries in v1."
