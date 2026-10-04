@@ -1608,6 +1608,24 @@ function asyncRoute(
   };
 }
 
+/**
+ * Before typing into Cursor: if its agent runtime is stuck ("Agent Execution Timed Out"
+ * + Reload Window), the prompt would time out and land back in the PC input box.
+ * Refuse with a clear fix instead. Unreadable sidebar → let the send path decide.
+ */
+async function assertCursorCanRun(ctx: HubContext): Promise<void> {
+  const sidebar = await ctx.live.scrapeSidebar();
+  if (!sidebar.ok) return;
+  const stuck = (sidebar.alerts ?? []).find((a) => a.needsReload);
+  if (stuck) {
+    throw new ApiError(
+      409,
+      "CURSOR_NEEDS_RELOAD",
+      `Cursor on the PC shows "${stuck.title}" — its agent runtime is not responding. Click Reload Window in Cursor on the PC, then send again.`,
+    );
+  }
+}
+
 export function createApiRouter(ctx: HubContext): Router {
   const router = Router();
 
@@ -1698,7 +1716,9 @@ export function createApiRouter(ctx: HubContext): Router {
       if (!text || text.length > 20_000) {
         throw new ApiError(400, "VALIDATION_ERROR", "text is required (max 20000 chars)");
       }
-      const result = await ctx.live.newAgentChat(sectionId, text, composerOptionsFromBody(req.body));
+      const options = composerOptionsFromBody(req.body);
+      await assertCursorCanRun(ctx);
+      const result = await ctx.live.newAgentChat(sectionId, text, options);
       if (!result.ok) {
         const status =
           result.code === "PROJECT_NOT_IN_SIDEBAR"
@@ -1708,7 +1728,8 @@ export function createApiRouter(ctx: HubContext): Router {
                 result.code === "MODEL_NOT_APPLIED" ||
                 result.code === "SEND_NOT_CONFIRMED" ||
                 result.code === "MENTION_NOT_APPLIED" ||
-                result.code === "IMAGE_NOT_ATTACHED"
+                result.code === "IMAGE_NOT_ATTACHED" ||
+                result.code === "COMPOSER_NOT_EMPTY"
               ? 409
               : 503;
         throw new ApiError(status, result.code, result.error);
@@ -1788,7 +1809,9 @@ export function createApiRouter(ctx: HubContext): Router {
       if (text.length > 20_000) {
         throw new ApiError(400, "VALIDATION_ERROR", "text is too long (max 20000 chars)");
       }
-      const result = await ctx.live.sendToAgentChat(composerId, text, composerOptionsFromBody(req.body));
+      const options = composerOptionsFromBody(req.body);
+      await assertCursorCanRun(ctx);
+      const result = await ctx.live.sendToAgentChat(composerId, text, options);
       if (!result.ok) {
         const status =
           result.code === "CHAT_NOT_IN_SIDEBAR"
@@ -1798,7 +1821,8 @@ export function createApiRouter(ctx: HubContext): Router {
                 result.code === "MODEL_NOT_APPLIED" ||
                 result.code === "SEND_NOT_CONFIRMED" ||
                 result.code === "MENTION_NOT_APPLIED" ||
-                result.code === "IMAGE_NOT_ATTACHED"
+                result.code === "IMAGE_NOT_ATTACHED" ||
+                result.code === "COMPOSER_NOT_EMPTY"
               ? 409
               : 503;
         throw new ApiError(status, result.code, result.error);

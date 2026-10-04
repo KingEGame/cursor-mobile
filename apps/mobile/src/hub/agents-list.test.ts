@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agentRowMeta, agentsSyncHint, countWaiting, filterAgents } from './agents-list';
+import { agentRowMeta, agentsSyncHint, countWaiting, cursorProblem, filterAgents } from './agents-list';
 import type { AgentsChatRow, AgentsResponse } from './types';
 
 function chat(partial: Partial<AgentsChatRow> & Pick<AgentsChatRow, 'title'>): AgentsChatRow {
@@ -77,5 +77,19 @@ describe('filterAgents', () => {
     assert.equal(filterAgents(res, 'OMNI').projects[0]!.chats.length, 1);
     assert.equal(filterAgents(res, '  ').projects.length, 2);
     assert.equal(filterAgents(res, 'zzz').projects.length, 0);
+  });
+});
+
+describe('cursorProblem', () => {
+  it('asks for Reload Window when Cursor\'s agent runtime is stuck', () => {
+    const alert = { title: 'Agent Execution Timed Out', message: 'x', actions: ['Reload Window'], error: true, needsReload: true };
+    assert.match(cursorProblem({ ...res, alerts: [alert] }) ?? '', /Reload Window/);
+  });
+
+  it('stays quiet for benign notices and older Hubs', () => {
+    const notice = { title: '1 queued', message: '', actions: [], error: false, needsReload: false };
+    assert.equal(cursorProblem({ ...res, alerts: [notice] }), null);
+    assert.equal(cursorProblem(res), null);
+    assert.equal(cursorProblem(null), null);
   });
 });

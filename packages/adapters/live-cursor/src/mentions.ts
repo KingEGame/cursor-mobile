@@ -98,7 +98,10 @@ export async function listMentionOptions(
   if (!(await focusEditorEnd(client))) {
     return { ok: false, code: "CDP_INPUT_FAILED", error: "No composer on the PC" };
   }
-  const typed = trigger + query;
+  // Cursor only opens the menu for a trigger at a word start: after existing draft text
+  // ("…else.") type a space first, and remove it again with the probe.
+  const tail = (await evaluate<string>(client, `(${EDITOR}.innerText || "").slice(-1)`)) ?? "";
+  const typed = (tail && !/\s/.test(tail) ? " " : "") + trigger + query;
   await client.send("Input.insertText", { text: typed });
   await wait(800);
   const options = (await evaluate<MentionOption[]>(client, READ_OPTIONS)) ?? [];

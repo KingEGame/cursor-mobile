@@ -53,6 +53,32 @@ async function composeAndSubmit(
   methods: string[],
   wait: Wait,
 ): Promise<ChatSendResult | null> {
+  // Never overwrite or glue onto text already in the PC chat box (an operator draft,
+  // or a prompt Cursor put back after a failed run).
+  const draft = await evaluate<{ text: string; chips: number; images: number } | null>(
+    client,
+    `(() => {
+      const e = document.querySelector(".ui-prompt-input-editor__input[contenteditable='true']");
+      if (!e) return null;
+      return {
+        text: (e.innerText || "").replace(/\\s+/g, " ").trim(),
+        chips: e.querySelectorAll(".node-mentionNode, .node-commandNode").length,
+        images: document.querySelectorAll('[aria-label="Remove image"]').length,
+      };
+    })()`,
+    methods,
+  );
+  if (draft && (draft.text || draft.chips || draft.images)) {
+    const preview = draft.text.length > 60 ? `${draft.text.slice(0, 60)}…` : draft.text;
+    return {
+      ok: false,
+      code: "COMPOSER_NOT_EMPTY",
+      error: preview
+        ? `The PC chat box already has unsent text ("${preview}"). Send or clear it in Cursor first — nothing was typed.`
+        : "The PC chat box already has attachments waiting. Send or clear them in Cursor first — nothing was typed.",
+      methods,
+    };
+  }
   if (composer?.mode || composer?.model) {
     const applied = await applyComposerOptions(client, composer, wait);
     if (!applied.ok) return { ok: false, code: applied.code, error: applied.error, methods };
@@ -110,7 +136,8 @@ export type ChatSendResult =
         | "MESSAGE_NOT_FOUND"
         | "EDIT_FAILED"
         | "MENTION_NOT_APPLIED"
-        | "IMAGE_NOT_ATTACHED";
+        | "IMAGE_NOT_ATTACHED"
+        | "COMPOSER_NOT_EMPTY";
       error: string;
       methods: string[];
     };

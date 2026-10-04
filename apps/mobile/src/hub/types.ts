@@ -516,10 +516,22 @@ export interface AgentsProjectRow {
   chats: AgentsChatRow[];
 }
 
+/** A notice Cursor shows above its composer on the PC. */
+export interface CursorAlert {
+  title: string;
+  message: string;
+  actions: string[];
+  error: boolean;
+  /** Cursor's agent runtime is stuck — sends won't run until Reload Window on the PC. */
+  needsReload: boolean;
+}
+
 export interface AgentsResponse {
   source: 'sidebar' | 'history';
   note: string | null;
   scannedAt: string;
+  /** Older Hubs omit this. */
+  alerts?: CursorAlert[];
   projects: AgentsProjectRow[];
 }
 

@@ -17,8 +17,8 @@ if [ -t 1 ]; then G=$'\e[32m'; R=$'\e[31m'; D=$'\e[2m'; B=$'\e[1m'; N=$'\e[0m'; 
 
 STEPS=(
   "build:packages|npm run build"
-  # Hub (all of test/ + tests/phase0..4 + TOR-08) and both adapters.
-  "test:hub+adapters|npm test"
+  # Hub (all of test/ + tests/phase0..4 + TOR-08), both adapters, and the Claude MCP server.
+  "test:hub+adapters+mcp|npm test"
   # Mobile: tsc --noEmit + node:test suites.
   "test:mobile|npm run test:mobile"
   "test:release-scripts|node --test scripts/release-scripts.test.mjs"

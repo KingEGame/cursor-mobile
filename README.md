@@ -78,6 +78,7 @@ Full index: [docs/README.md](docs/README.md)
 | [GETTING-STARTED.md](docs/GETTING-STARTED.md) | Tailscale → Hub → CDP → APK → pair |
 | [CONFIGURATION.md](docs/CONFIGURATION.md) | Config knobs (Phase 0 Hub + mobile) |
 | [packages/hub/README.md](packages/hub/README.md) | Hub run / test instructions |
+| [packages/mcp/README.md](packages/mcp/README.md) | Claude MCP server: drive Cursor chats on this PC through the Hub |
 | [apps/mobile/README.md](apps/mobile/README.md) | Expo run / EAS APK notes |
 
 ### Reports

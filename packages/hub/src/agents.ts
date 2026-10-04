@@ -21,6 +21,7 @@ import {
 import {
   AGENT_MODES,
   type AgentMode,
+  type CursorAlert,
   type SidebarLiveState,
   type SidebarScrapeResult,
 } from "@cursor-mobile/live-cursor";
@@ -82,6 +83,8 @@ export interface AgentsResponse {
   /** Why the sidebar was not used (fallback mode only). */
   note: string | null;
   scannedAt: string;
+  /** Notices shown above the PC composer; an `error` one means sends will not run. */
+  alerts: CursorAlert[];
   projects: AgentsProjectRow[];
 }
 
@@ -102,6 +105,7 @@ export function buildAgentsResponse(
       source: "sidebar",
       note: null,
       scannedAt: now.toISOString(),
+      alerts: sidebar.alerts ?? [],
       // Sections whose rows are all non-local (e.g. `bc-` background/cloud agents, which
       // the product locks out) would render as empty projects — drop them.
       projects: sidebar.sections.filter((sec) => sec.chats.length > 0).map((sec) => ({
@@ -138,6 +142,7 @@ export function buildAgentsResponse(
     source: "history",
     note: sidebar.error,
     scannedAt: now.toISOString(),
+    alerts: [],
     projects: index.recent(40).map((g) => ({
       projectId: g.projectId,
       name: g.name,

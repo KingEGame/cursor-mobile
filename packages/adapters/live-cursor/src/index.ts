@@ -122,12 +122,14 @@ export type {
 } from "./types.js";
 
 export {
+  parseCursorAlerts,
   parseSidebarSnapshot,
   scrapeAgentsSidebar,
   sidebarLiveState,
   SIDEBAR_SCRAPE_EXPRESSION,
 } from "./sidebar-scrape.js";
 export type {
+  CursorAlert,
   SidebarChat,
   SidebarLiveState,
   SidebarScrapeResult,

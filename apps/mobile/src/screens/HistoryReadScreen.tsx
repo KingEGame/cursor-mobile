@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Markdown } from '../components/Markdown';
 import { ChatComposer, type ComposerSubmit } from '../composer/ChatComposer';
 import { loadLockSettings, unlock } from '../security/app-lock';
+import { cursorProblem } from '../hub/agents-list';
 import { createHubClient } from '../hub/client';
 import { HubApiError, type ChatMessage } from '../hub/types';
 import type { RootStackParamList } from '../navigation/types';
@@ -56,6 +57,8 @@ export function HistoryReadScreen({ navigation, route }: Props) {
   /** Live run state of this chat on the PC (from the Agents sidebar). */
   const [running, setRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
+  /** Error banner Cursor shows on the PC (e.g. needs Reload Window). */
+  const [cursorAlert, setCursorAlert] = useState<string | null>(null);
   /** Totals of files this chat changed on the PC (null until loaded / none). */
   const [changes, setChanges] = useState<{ files: number; added: number; removed: number } | null>(
     null,
@@ -77,6 +80,7 @@ export function HistoryReadScreen({ navigation, route }: Props) {
         client.listAgents().catch(() => null),
       ]);
       setMessages(packed.messages);
+      setCursorAlert(cursorProblem(agents));
       if (agents && composerId) {
         const chat = agents.projects.flatMap((p) => p.chats).find((c) => c.composerId === composerId);
         setRunning(chat?.status === 'working');
@@ -246,6 +250,11 @@ export function HistoryReadScreen({ navigation, route }: Props) {
       </ScrollView>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
+      {cursorAlert ? (
+        <Text style={styles.cursorAlert} testID="chat-cursor-alert">
+          {cursorAlert}
+        </Text>
+      ) : null}
 
       {running ? (
         <View style={styles.workingBar} testID="chat-working">
@@ -296,6 +305,13 @@ const styles = StyleSheet.create({
   content: { padding: spacing.md, gap: spacing.sm, paddingBottom: spacing.lg },
   title: { color: colors.text, fontSize: 20, fontWeight: '700', marginBottom: spacing.xs },
   error: { color: colors.danger, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
+  cursorAlert: {
+    color: colors.danger,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 13,
+  },
   bubble: {
     borderRadius: radii.md,
     padding: spacing.md,

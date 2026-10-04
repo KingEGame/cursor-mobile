@@ -34,6 +34,15 @@ export function agentsSyncHint(res: AgentsResponse): string {
   return `${counts} from PC history — Cursor Agents window not readable right now`;
 }
 
+/** One-line warning when Cursor on the PC shows an error banner (null when fine). */
+export function cursorProblem(res: AgentsResponse | null): string | null {
+  const alert = res?.alerts?.find((a) => a.needsReload) ?? res?.alerts?.find((a) => a.error);
+  if (!alert) return null;
+  return alert.needsReload
+    ? `Cursor on your PC shows “${alert.title}”. Click Reload Window in Cursor — messages won’t run until then.`
+    : `Cursor on your PC shows “${alert.title}”${alert.message ? `: ${alert.message}` : ''}`;
+}
+
 /** Waiting-for-approval chats across all projects (for the Home pill / badge). */
 export function countWaiting(res: AgentsResponse | null): number {
   if (!res) return 0;

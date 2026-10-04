@@ -25,6 +25,7 @@ import {
   agentRowMeta,
   agentsSyncHint,
   countWaiting,
+  cursorProblem,
   filterAgents,
 } from '../hub/agents-list';
 import { createHubClient } from '../hub/client';
@@ -246,6 +247,12 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
         />
       </View>
 
+      {cursorProblem(agents) ? (
+        <Text style={styles.cursorAlert} testID="chats-cursor-alert">
+          {cursorProblem(agents)}
+        </Text>
+      ) : null}
+
       {agents ? (
         <Text style={styles.syncHint} numberOfLines={2} testID="chats-sync-status">
           {agentsSyncHint(agents)}
@@ -442,6 +449,15 @@ const styles = StyleSheet.create({
     minHeight: 44,
     color: colors.text,
     fontSize: type.body,
+  },
+  cursorAlert: {
+    color: colors.danger,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+    padding: spacing.sm,
+    fontSize: 13,
   },
   syncHint: {
     color: colors.muted,

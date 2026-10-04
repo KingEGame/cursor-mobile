@@ -88,6 +88,13 @@ describe("buildAgentsResponse", () => {
     expect(res.projects[0]!.chats[0]).toMatchObject({ title: "Chat 11111111", status: "idle" });
   });
 
+  it("passes Cursor's composer alerts through", () => {
+    const alert = { title: "Agent Execution Timed Out", message: "x", actions: ["Reload Window"], error: true, needsReload: true };
+    const res = buildAgentsResponse({ ok: true, sections: [], alerts: [alert] }, index, NOW);
+    expect(res.alerts).toEqual([alert]);
+    expect(buildAgentsResponse({ ok: false, error: "down" }, index, NOW).alerts).toEqual([]);
+  });
+
   it("falls back to local history and says why when the sidebar is unreadable", () => {
     const res = buildAgentsResponse({ ok: false, error: "Cursor down" }, index, NOW);
     expect(res).toMatchObject({ source: "history", note: "Cursor down" });

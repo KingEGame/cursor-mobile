@@ -50,14 +50,37 @@ export interface SidebarSection {
   chats: SidebarChat[];
 }
 
+/**
+ * A notice tray above the Agents composer (e.g. "Agent Execution Timed Out" with
+ * "Reload Window"). When one is an error, sends from the phone / Claude will not run.
+ */
+export interface CursorAlert {
+  title: string;
+  message: string;
+  /** Button labels offered in the tray ("Reload Window", "Copy ID"…). */
+  actions: string[];
+  error: boolean;
+  /** Cursor's agent runtime (extension host) is stuck — only Reload Window on the PC fixes it. */
+  needsReload: boolean;
+}
+
 export type SidebarScrapeResult =
-  | { ok: true; sections: SidebarSection[] }
+  | { ok: true; sections: SidebarSection[]; alerts?: CursorAlert[] }
   | { ok: false; error: string };
 
 export const SIDEBAR_SCRAPE_EXPRESSION = `(() => {
   const text = (el) => (el ? el.textContent.replace(/\\s+/g, " ").trim() : "");
   const sections = [...document.querySelectorAll("section[data-agent-drop-section-id]")];
-  return sections.map((sec) => {
+  // Visible notice trays above the composer ("Agent Execution Timed Out" + "Reload Window").
+  const alerts = [...document.querySelectorAll('.ui-prompt-input-header-tray__tray[data-visible="true"]')]
+    .filter((t) => t.getAttribute("aria-hidden") !== "true")
+    .map((t) => ({
+      lines: [...t.querySelectorAll(".ui-text")].map(text).filter(Boolean),
+      actions: [...t.querySelectorAll("button")]
+        .map((b) => (b.getAttribute("aria-label") || b.textContent || "").replace(/\\s+/g, " ").trim())
+        .filter(Boolean),
+    }));
+  const list = sections.map((sec) => {
     const head = sec.querySelector("[data-section-head]");
     const chats = [...sec.querySelectorAll('li[data-sidebar-item-key^="row:"]')].map((li) => {
       const btn = li.querySelector("[data-sidebar-menu-button]");
@@ -89,7 +112,29 @@ export const SIDEBAR_SCRAPE_EXPRESSION = `(() => {
       chats,
     };
   });
+  return { sections: list, alerts };
 })()`;
+
+const ERROR_TEXT = /timed out|error|failed|did not respond|unavailable|unresponsive|crash/i;
+
+export function parseCursorAlerts(value: unknown): CursorAlert[] {
+  if (!Array.isArray(value)) return [];
+  const out: CursorAlert[] = [];
+  for (const raw of value as Array<Record<string, unknown>>) {
+    const lines = Array.isArray(raw?.lines) ? raw.lines.filter((l): l is string => typeof l === "string" && !!l.trim()) : [];
+    const actions = Array.isArray(raw?.actions)
+      ? raw.actions.filter((a): a is string => typeof a === "string" && !!a.trim()).slice(0, 6)
+      : [];
+    if (lines.length === 0) continue;
+    const title = lines[0]!.slice(0, 200);
+    const message = lines.slice(1).join(" ").slice(0, 600);
+    const all = `${title} ${message}`;
+    const needsReload = actions.some((a) => /reload window/i.test(a)) || /extension host/i.test(all);
+    const error = needsReload || actions.some((a) => /dismiss error/i.test(a)) || ERROR_TEXT.test(all);
+    out.push({ title, message, actions, error, needsReload });
+  }
+  return out;
+}
 
 const COMPOSER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -97,7 +142,11 @@ const COMPOSER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
  * Validate the page's return value. Fail closed: anything off-shape (Cursor changed
  * its DOM) is an error, never a partial guess.
  */
-export function parseSidebarSnapshot(value: unknown): SidebarScrapeResult {
+export function parseSidebarSnapshot(snapshot: unknown): SidebarScrapeResult {
+  // Current shape: { sections, alerts }; older snapshots were the bare section list.
+  const wrapped = !!snapshot && typeof snapshot === "object" && !Array.isArray(snapshot);
+  const value = wrapped ? (snapshot as { sections?: unknown }).sections : snapshot;
+  const alerts = wrapped ? parseCursorAlerts((snapshot as { alerts?: unknown }).alerts) : [];
   if (!Array.isArray(value)) {
     return { ok: false, error: "Sidebar scrape returned no section list" };
   }
@@ -133,7 +182,7 @@ export function parseSidebarSnapshot(value: unknown): SidebarScrapeResult {
       chats,
     });
   }
-  return { ok: true, sections };
+  return { ok: true, sections, alerts };
 }
 
 export async function scrapeAgentsSidebar(client: CdpClient): Promise<SidebarScrapeResult> {

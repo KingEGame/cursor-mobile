@@ -5,14 +5,15 @@
   "description": "PC-local Cursor companion — Hub + Android APK (Phase 0 scaffold)",
   "workspaces": [
     "packages/hub",
+    "packages/mcp",
     "packages/adapters/*",
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @cursor-mobile/live-cursor && npm run build -w @cursor-mobile/history && npm run build -w @cursor-mobile/hub",
+    "build": "npm run build -w @cursor-mobile/live-cursor && npm run build -w @cursor-mobile/history && npm run build -w @cursor-mobile/hub && npm run build -w @cursor-mobile/mcp",
     "build:hub": "npm run build -w @cursor-mobile/hub",
     "start": "npm run start -w @cursor-mobile/hub",
-    "test": "npm run test -w @cursor-mobile/hub && npm run test -w @cursor-mobile/live-cursor && npm run test -w @cursor-mobile/history",
+    "test": "npm run test -w @cursor-mobile/hub && npm run test -w @cursor-mobile/live-cursor && npm run test -w @cursor-mobile/history && npm run test -w @cursor-mobile/mcp",
     "test:hub": "npm run test -w @cursor-mobile/hub",
     "test:phase0": "npm run test:phase0 -w @cursor-mobile/hub",
     "test:phase1": "npm run test:phase1 -w @cursor-mobile/hub && npm run test -w @cursor-mobile/live-cursor",
@@ -52,7 +53,9 @@
     "package:desktop": "node scripts/package-desktop.mjs",
     "package:desktop:linux": "node scripts/package-desktop.mjs --platform linux",
     "package:desktop:win": "node scripts/package-desktop.mjs --platform win",
-    "package:desktop:mac": "node scripts/package-desktop.mjs --platform mac"
+    "package:desktop:mac": "node scripts/package-desktop.mjs --platform mac",
+    "test:mcp": "npm run test -w @cursor-mobile/mcp",
+    "mcp:install": "bash scripts/install-claude-mcp.sh"
   },
   "devDependencies": {
     "esbuild": "^0.25.9"

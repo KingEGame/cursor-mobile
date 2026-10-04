@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createMockCdpClient } from "./cdp-client.js";
-import { parseSidebarSnapshot, scrapeAgentsSidebar, sidebarLiveState } from "./sidebar-scrape.js";
+import { parseCursorAlerts, parseSidebarSnapshot, scrapeAgentsSidebar, sidebarLiveState } from "./sidebar-scrape.js";
 
 const CHAT_A = "466762d6-04ca-46e6-a047-4ad7932ae829";
 const CHAT_B = "5197bfb7-05a0-460d-9c89-6b2b0fd2f4c9";
@@ -99,5 +99,41 @@ describe("sidebarLiveState", () => {
     ]);
     if (!res.ok) throw new Error(res.error);
     expect(res.sections[0]!.chats[0]!.live).toBe("working");
+  });
+});
+
+describe("parseCursorAlerts", () => {
+  it("flags a timed-out agent runtime as an error that needs Reload Window", () => {
+    const res = parseSidebarSnapshot({
+      sections: snapshot,
+      alerts: [
+        {
+          lines: ["Agent Execution Timed Out", "The agent execution provider did not respond in time."],
+          actions: ["Copy ID", "Reload Window", "Dismiss error"],
+        },
+      ],
+    });
+    if (!res.ok) throw new Error(res.error);
+    expect(res.alerts).toEqual([
+      {
+        title: "Agent Execution Timed Out",
+        message: "The agent execution provider did not respond in time.",
+        actions: ["Copy ID", "Reload Window", "Dismiss error"],
+        error: true,
+        needsReload: true,
+      },
+    ]);
+  });
+
+  it("keeps benign notices as non-errors and ignores junk", () => {
+    expect(parseCursorAlerts([{ lines: ["2 messages queued"], actions: ["Clear"] }, { lines: [] }, null])).toEqual([
+      { title: "2 messages queued", message: "", actions: ["Clear"], error: false, needsReload: false },
+    ]);
+    expect(parseCursorAlerts(undefined)).toEqual([]);
+  });
+
+  it("still accepts the older bare section list", () => {
+    const res = parseSidebarSnapshot(snapshot);
+    expect(res.ok && res.alerts).toEqual([]);
   });
 });

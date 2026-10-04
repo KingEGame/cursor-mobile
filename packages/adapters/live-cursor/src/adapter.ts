@@ -12,6 +12,7 @@ import {
   scrapeAgentsSidebar,
   type SidebarScrapeResult,
   type SidebarSection,
+  type CursorAlert,
 } from "./sidebar-scrape.js";
 import { randomBytes } from "node:crypto";
 import {
@@ -1244,6 +1245,8 @@ export function createMockLiveCursorAdapter(
     scrapedModels: ScrapedModelOption[];
     /** When set, scrapeSidebar returns these sections (cdp_ok only). */
     sidebarSections: SidebarSection[];
+    /** Composer notice trays reported with the sidebar (e.g. a timed-out agent runtime). */
+    cursorAlerts: CursorAlert[];
   }> = {},
 ): LiveCursorAdapter {
   const cdpUrl = normalizeCdpUrl(overrides.cdpUrl ?? "http://127.0.0.1:9222");
@@ -1714,6 +1717,7 @@ export function createMockLiveCursorAdapter(
           ...sec,
           chats: sec.chats.map((c) => ({ ...c })),
         })),
+        alerts: (overrides.cursorAlerts ?? []).map((a) => ({ ...a, actions: [...a.actions] })),
       };
     },
   };

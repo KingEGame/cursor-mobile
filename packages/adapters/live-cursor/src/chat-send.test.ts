@@ -19,12 +19,15 @@ const sendSelector: ActionSelector = {
 
 /** Fake Agents window: which chat is open, whether the row exists / is collapsed, and
  * whether a click on the row actually switches the main pane. */
-function fakeCursor(opts: { open: string; rowPresent?: boolean; collapsed?: boolean; clickSwitches?: boolean; stuck?: boolean }) {
+function fakeCursor(opts: { open: string; rowPresent?: boolean; collapsed?: boolean; clickSwitches?: boolean; stuck?: boolean; draft?: string }) {
   let open = opts.open;
   const client = createMockCdpClient({
     "Runtime.evaluate": (params) => {
       const expr = String(params.expression);
       if (expr.includes('querySelector("[data-composer-id]")')) return { result: { value: open } };
+      if (expr.includes("images: document.querySelectorAll")) {
+        return { result: { value: { text: opts.draft ?? "", chips: 0, images: 0 } } };
+      }
       if (expr.includes("ed ? ed.textContent.trim() : null")) return { result: { value: opts.stuck ? "unsent" : "" } };
       if (expr.includes("present:")) {
         return { result: { value: { present: opts.rowPresent ?? true, collapsed: opts.collapsed ?? false } } };
@@ -104,6 +107,17 @@ describe("sendToAgentChat", () => {
     });
     expect(res).toMatchObject({ ok: false, code: "CHAT_SWITCH_FAILED" });
     expect(methods(client)).not.toContain("Input.insertText");
+  });
+});
+
+describe("unsent text already in the PC chat box", () => {
+  it("refuses to send instead of overwriting or merging the draft", async () => {
+    const client = fakeCursor({ open: TARGET, draft: "operator was typing this" });
+    const res = await sendToAgentChat(client, TARGET, "hi", sendSelector, { wait: noWait });
+    expect(res).toMatchObject({ ok: false, code: "COMPOSER_NOT_EMPTY" });
+    expect(res.ok ? "" : res.error).toMatch(/operator was typing this/);
+    expect(methods(client)).not.toContain("Input.insertText");
+    expect(methods(client)).not.toContain("Input.dispatchKeyEvent");
   });
 });
 
