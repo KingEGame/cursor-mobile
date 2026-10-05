@@ -10,7 +10,7 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @cursor-mobile/live-cursor && npm run build -w @cursor-mobile/history && npm run build -w @cursor-mobile/hub && npm run build -w @cursor-mobile/mcp",
+    "build": "npm run build -w @cursor-mobile/live-cursor && npm run build -w @cursor-mobile/history && npm run build -w @cursor-mobile/hub && npm run build -w @cursor-mobile/mcp && node scripts/build-claude-plugin.mjs",
     "build:hub": "npm run build -w @cursor-mobile/hub",
     "start": "npm run start -w @cursor-mobile/hub",
     "test": "npm run test -w @cursor-mobile/hub && npm run test -w @cursor-mobile/live-cursor && npm run test -w @cursor-mobile/history && npm run test -w @cursor-mobile/mcp",
@@ -55,7 +55,8 @@
     "package:desktop:win": "node scripts/package-desktop.mjs --platform win",
     "package:desktop:mac": "node scripts/package-desktop.mjs --platform mac",
     "test:mcp": "npm run test -w @cursor-mobile/mcp",
-    "mcp:install": "bash scripts/install-claude-mcp.sh"
+    "mcp:install": "bash scripts/install-claude-mcp.sh",
+    "plugin:build": "node scripts/build-claude-plugin.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.9"

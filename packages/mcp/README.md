@@ -16,14 +16,22 @@ flowchart LR
   Hub -->|"CDP 127.0.0.1:9222"| Cursor["Cursor Agents window"]
 ```
 
-## Install
+## Install (Claude Code plugin)
 
 ```bash
 npm run mcp:install
 ```
 
-This builds the package and runs `claude mcp add cursor -s user -- node <repo>/packages/mcp/dist/index.js`.
-Restart Claude Code sessions to load it. Remove it with `claude mcp remove cursor -s user`.
+This installs the **`cursor-hub`** plugin from the repo's local marketplace
+(`claude-plugin/`, marketplace name `cursor-mobile`). The plugin bundles:
+
+- the MCP server, as one self-contained file
+  (`claude-plugin/cursor-hub/server/cursor-mcp.mjs`, built by `npm run plugin:build`);
+- the `cursor-hub` skill, which teaches Claude the safe loop (status → list → send → wait →
+  changes/diff) and its rules.
+
+Restart Claude Code sessions to load it. Remove it with `claude plugin uninstall cursor-hub@cursor-mobile`.
+The release gate fails if the bundled server is older than `packages/mcp/src`.
 
 ## Pairing
 

@@ -22,6 +22,8 @@ STEPS=(
   # Mobile: tsc --noEmit + node:test suites.
   "test:mobile|npm run test:mobile"
   "test:release-scripts|node --test scripts/release-scripts.test.mjs"
+  # The Claude plugin ships a bundled copy of packages/mcp; it must match the source.
+  "plugin:bundle-fresh|git diff --quiet -- claude-plugin/cursor-hub/server || { echo 'claude-plugin bundle is stale: commit the output of npm run plugin:build'; exit 1; }"
 )
 # Needs the real Cursor window / processes on this PC — never in CI.
 if [ "${GATE_CI:-0}" != "1" ]; then

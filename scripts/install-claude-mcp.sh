@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# Register the cursor-mobile MCP server with Claude Code (user scope, this PC only).
-# The server talks to the local Hub on 127.0.0.1 and pairs itself once as "Claude (MCP)".
+# Install the cursor-hub Claude Code plugin (user scope, this PC only) from the repo's
+# local marketplace. The plugin's MCP server talks to the Hub on 127.0.0.1 and pairs
+# itself once as "Claude (MCP)".
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NAME="${MCP_NAME:-cursor}"
-HUB_URL="${HUB_URL:-http://127.0.0.1:8787}"
-
 command -v claude >/dev/null 2>&1 || { echo "claude CLI not found on PATH" >&2; exit 1; }
 
 cd "${REPO_ROOT}"
-npm run build -s -w @cursor-mobile/mcp
+node scripts/build-claude-plugin.mjs
 
-claude mcp remove "${NAME}" -s user >/dev/null 2>&1 || true
-claude mcp add "${NAME}" -s user -e "HUB_URL=${HUB_URL}" -- node "${REPO_ROOT}/packages/mcp/dist/index.js"
+# Older installs registered a bare MCP server; the plugin replaces it.
+claude mcp remove cursor -s user >/dev/null 2>&1 || true
 
-echo "Registered MCP server '${NAME}' → ${HUB_URL}. Restart Claude Code sessions to load it."
+if claude plugin marketplace list 2>/dev/null | grep -q "cursor-mobile"; then
+  claude plugin marketplace update cursor-mobile
+else
+  claude plugin marketplace add "${REPO_ROOT}/claude-plugin"
+fi
+claude plugin install cursor-hub@cursor-mobile -s user
+
+echo "Installed plugin cursor-hub. Restart Claude Code sessions to load it."
