@@ -1,16 +1,22 @@
 /**
  * App-lock decisions (pure — no native calls, so it is unit-testable).
- * The phone can make an agent act on the PC, so sending is gated by default.
+ *
+ * lockSend is paused (always off): operators disliked fingerprint/PIN on every
+ * send. lockOpen remains optional via Account → Security.
  */
 
 export interface LockSettings {
-  /** Fingerprint / PIN before a message is sent to the PC (default on). */
+  /** Fingerprint / PIN before a message is sent to the PC (paused — always off). */
   lockSend: boolean;
   /** Fingerprint / PIN when the app is opened or comes back from background (default off). */
   lockOpen: boolean;
 }
 
-export const DEFAULT_LOCK_SETTINGS: LockSettings = { lockSend: true, lockOpen: false };
+/** lockSend stayed true historically; keep the field but default / force off for now. */
+export const DEFAULT_LOCK_SETTINGS: LockSettings = { lockSend: false, lockOpen: false };
+
+/** Feature pause: unlock-to-send is disabled until re-enabled deliberately. */
+export const LOCK_SEND_ENABLED = false;
 
 export interface DeviceAuth {
   hasHardware: boolean;
@@ -42,7 +48,12 @@ export function parseLockSettings(raw: string | null): LockSettings {
   try {
     const v = JSON.parse(raw) as Partial<LockSettings>;
     return {
-      lockSend: typeof v.lockSend === 'boolean' ? v.lockSend : DEFAULT_LOCK_SETTINGS.lockSend,
+      // Ignore stored lockSend while the feature is paused.
+      lockSend: LOCK_SEND_ENABLED
+        ? typeof v.lockSend === 'boolean'
+          ? v.lockSend
+          : DEFAULT_LOCK_SETTINGS.lockSend
+        : false,
       lockOpen: typeof v.lockOpen === 'boolean' ? v.lockOpen : DEFAULT_LOCK_SETTINGS.lockOpen,
     };
   } catch {

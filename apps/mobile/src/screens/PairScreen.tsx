@@ -1,4 +1,4 @@
-import { QrCode } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, QrCode } from 'lucide-react-native';
 import { QrScanner } from '../components/QrScanner';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -7,6 +7,7 @@ import {
   Linking,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,6 +15,7 @@ import {
 } from 'react-native';
 import Constants from 'expo-constants';
 import { useRoute, type RouteProp } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HubApiError } from '../hub/types';
 import { createHubClient } from '../hub/client';
 import {
@@ -28,7 +30,8 @@ import {
   saveHubBaseUrl,
   savePairingSuccess,
 } from '../storage/pairing';
-import { colors, spacing } from '../theme';
+import { CalmEnter } from '../motion/calmEnter';
+import { colors, radii, spacing, type } from '../theme';
 import {
   isPairTokenInject,
   parsePairDeepLink,
@@ -36,6 +39,9 @@ import {
 } from '../navigation/pair-deep-link';
 import type { RootNav, RootStackParamList } from '../navigation/types';
 import { useAppSession } from '../session/AppSessionContext';
+
+/** Loopback pair page — open on the PC browser only. */
+const PC_PAIR_URL = 'http://127.0.0.1:8787/pair';
 
 interface Props {
   navigation: RootNav;
@@ -51,7 +57,7 @@ function hubUrlFromPairParams(
   if (params?.host?.trim()) {
     const host = params.host.trim();
     const port = (params.port || '8787').trim();
-    // QR may advertise loopback — prefer session/default mesh URL instead.
+    // QR must advertise Tailscale host — loopback is useless on the phone.
     if (host === '127.0.0.1' || host === 'localhost' || host === '::1') {
       return sessionUrl || getDefaultHubUrl() || '';
     }
@@ -63,6 +69,7 @@ function hubUrlFromPairParams(
 export function PairScreen({ navigation }: Props) {
   const session = useAppSession();
   const { refreshFromStorage } = session;
+  const insets = useSafeAreaInsets();
   const route = useRoute<RouteProp<RootStackParamList, 'Pair'>>();
   const params = route.params;
   const [hubUrl, setHubUrl] = useState(() => hubUrlFromPairParams(params, session.hubBaseUrl));
@@ -72,6 +79,8 @@ export function PairScreen({ navigation }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+  const [showTailscale, setShowTailscale] = useState(false);
   const autoStarted = useRef(false);
   const hubUrlRef = useRef(hubUrl);
   hubUrlRef.current = hubUrl;
@@ -82,53 +91,121 @@ export function PairScreen({ navigation }: Props) {
     }
   }, [session.hubBaseUrl, hubUrl]);
 
+  const pairWith = useCallback(
+    async (input: { hubUrl: string; code: string; pairId?: string; deviceName?: string }) => {
+      setError(null);
+      const base = normalizeHubBaseUrl(input.hubUrl);
+      const pairCode = input.code.trim();
+      if (!base) {
+        setError(
+          `QR did not include a reachable Hub address. On the PC open ${PC_PAIR_URL} (Hub must advertise Tailscale, not 127.0.0.1).`,
+        );
+        setShowManual(true);
+        return false;
+      }
+      if (!pairCode) {
+        setError('No pair code — scan the QR on the PC pair page.');
+        return false;
+      }
+
+      setBusy(true);
+      try {
+        const client = createHubClient({ baseUrl: base });
+        const appVersion = Constants.expoConfig?.version ?? '0.1.0';
+        const result = await client.pairComplete({
+          code: pairCode,
+          pairId: input.pairId?.trim() || undefined,
+          deviceName: (input.deviceName ?? deviceName).trim() || 'Android phone',
+          platform: 'android',
+          appVersion,
+          clientPublicKey: null,
+        });
+
+        const resolvedUrl = resolvePairedHubBaseUrl(base, result.hub.baseUrlHint);
+        await savePairingSuccess({
+          hubBaseUrl: resolvedUrl,
+          deviceToken: result.deviceToken,
+          deviceId: result.deviceId,
+          hubDisplayName: result.hub.displayName,
+        });
+
+        await refreshFromStorage();
+        navigation.replace('Health');
+        return true;
+      } catch (err) {
+        if (err instanceof HubApiError) {
+          setError(`${err.code}: ${err.message}`);
+        } else {
+          setError(err instanceof Error ? err.message : 'Pairing failed');
+        }
+        setShowManual(true);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [deviceName, navigation, refreshFromStorage],
+  );
+
   const applyPairParams = useCallback(
     (incoming: PairDeepLinkParams | null | undefined) => {
-      if (!incoming) return;
+      if (!incoming) return { hub: '', code: '', pairId: '' };
+      let nextCode = '';
+      let nextPairId = '';
       if (incoming.code?.trim()) {
-        // A fresh QR / link is a new attempt: drop the stale error and re-arm auto-pair.
-        setCode(incoming.code.trim());
+        nextCode = incoming.code.trim();
+        setCode(nextCode);
         setError(null);
         autoStarted.current = false;
       }
-      if (incoming.pairId?.trim()) setPairId(incoming.pairId.trim());
+      if (incoming.pairId?.trim()) {
+        nextPairId = incoming.pairId.trim();
+        setPairId(nextPairId);
+      }
       const resolvedHub = hubUrlFromPairParams(incoming, session.hubBaseUrl);
       if (resolvedHub) setHubUrl(resolvedHub);
 
-      if (!isPairTokenInject(incoming)) return;
-      const token = incoming.deviceToken!.trim();
-      const deviceId = incoming.deviceId!.trim();
-      const base =
-        resolvedHub ||
-        normalizeHubBaseUrl(incoming.hubUrl || '') ||
-        normalizeHubBaseUrl(hubUrlRef.current);
-      if (!base || autoStarted.current) return;
-      autoStarted.current = true;
-      void (async () => {
-        try {
-          setBusy(true);
-          await savePairingSuccess({
-            hubBaseUrl: base,
-            deviceToken: token,
-            deviceId,
-            hubDisplayName: incoming.hubDisplayName?.trim() || 'Desk PC',
-          });
-          await refreshFromStorage();
-          navigation.replace('Health');
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'Token inject failed');
-          autoStarted.current = false;
-        } finally {
-          setBusy(false);
+      // PC already completed pair — save token and leave Pair (no form).
+      if (isPairTokenInject(incoming) && !autoStarted.current) {
+        const token = incoming.deviceToken!.trim();
+        const deviceId = incoming.deviceId!.trim();
+        const base =
+          resolvedHub ||
+          normalizeHubBaseUrl(incoming.hubUrl || '') ||
+          normalizeHubBaseUrl(hubUrlRef.current);
+        if (base) {
+          autoStarted.current = true;
+          void (async () => {
+            try {
+              setBusy(true);
+              await savePairingSuccess({
+                hubBaseUrl: base,
+                deviceToken: token,
+                deviceId,
+                hubDisplayName: incoming.hubDisplayName?.trim() || 'Desk PC',
+              });
+              await refreshFromStorage();
+              navigation.replace('Health');
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'Token inject failed');
+              autoStarted.current = false;
+            } finally {
+              setBusy(false);
+            }
+          })();
         }
-      })();
+      }
+
+      return {
+        hub: resolvedHub,
+        code: nextCode || incoming.code?.trim() || '',
+        pairId: nextPairId || incoming.pairId?.trim() || '',
+      };
     },
-    [navigation, session],
+    [session.hubBaseUrl, refreshFromStorage, navigation],
   );
 
-  // Apply deep-link / QR params when navigation delivers them after mount.
-  // Also listen for Linking URL events — after pm clear, getInitialURL is often null
-  // and the repair script re-fires the pair deep link once the app is up.
+  // Deep-link / QR params after mount + Linking events.
   useEffect(() => {
     let cancelled = false;
 
@@ -152,56 +229,10 @@ export function PairScreen({ navigation }: Props) {
   }, [params, applyPairParams]);
 
   const onPair = useCallback(async () => {
-    setError(null);
-    const base = normalizeHubBaseUrl(hubUrl);
-    const pairCode = code.trim();
-    if (!base) {
-      setError(
-        `Enter the Hub base URL (Tailscale IP or MagicDNS), e.g. ${HUB_URL_HINTS.ipv4}`,
-      );
-      return;
-    }
-    if (!pairCode) {
-      setError('Enter the pair code shown on the PC Hub.');
-      return;
-    }
+    await pairWith({ hubUrl, code, pairId, deviceName });
+  }, [pairWith, hubUrl, code, pairId, deviceName]);
 
-    setBusy(true);
-    try {
-      const client = createHubClient({ baseUrl: base });
-      const appVersion = Constants.expoConfig?.version ?? '0.1.0';
-      const result = await client.pairComplete({
-        code: pairCode,
-        pairId: pairId.trim() || undefined,
-        deviceName: deviceName.trim() || 'Android phone',
-        platform: 'android',
-        appVersion,
-        clientPublicKey: null,
-      });
-
-      const resolvedUrl = resolvePairedHubBaseUrl(base, result.hub.baseUrlHint);
-      await savePairingSuccess({
-        hubBaseUrl: resolvedUrl,
-        deviceToken: result.deviceToken,
-        deviceId: result.deviceId,
-        hubDisplayName: result.hub.displayName,
-      });
-
-      await refreshFromStorage();
-      navigation.replace('Health');
-    } catch (err) {
-      if (err instanceof HubApiError) {
-        setError(`${err.code}: ${err.message}`);
-      } else {
-        setError(err instanceof Error ? err.message : 'Pairing failed');
-      }
-    } finally {
-      setBusy(false);
-    }
-  }, [hubUrl, code, pairId, deviceName, navigation, refreshFromStorage]);
-
-  // Deep link / QR with a code → auto pairComplete (adb UAT + operator QR).
-  // Token-inject deep link (PC already called pairComplete) → save + Health.
+  // Token-inject deep link (PC already completed pair) or QR with code → auto pair.
   useEffect(() => {
     if (autoStarted.current) return;
     const autoFlag = (params?.auto ?? '1').trim().toLowerCase();
@@ -236,18 +267,46 @@ export function PairScreen({ navigation }: Props) {
     const pairCode = params?.code?.trim() || code.trim();
     if (!pairCode) return;
     if (!normalizeHubBaseUrl(hubUrl)) return;
+    // Only auto-start when params brought a code (QR / deep link), not idle form.
+    if (!params?.code?.trim()) return;
     autoStarted.current = true;
-    void onPair();
-  }, [params, code, hubUrl, onPair, navigation, refreshFromStorage]);
+    void pairWith({ hubUrl, code: pairCode, pairId, deviceName }).then((ok) => {
+      if (!ok) autoStarted.current = false;
+    });
+  }, [params, code, hubUrl, pairId, deviceName, pairWith, navigation, refreshFromStorage]);
 
-  /** Persist typed Hub URL before Health so mesh smoke works without pairing. */
+  const onScanQr = useCallback(
+    (data: string) => {
+      setScanning(false);
+      const parsed = parsePairDeepLink(data);
+      if (!parsed?.code) {
+        setError(
+          `That QR is not a Cursor Mobile pairing code. On the PC open ${PC_PAIR_URL}.`,
+        );
+        return;
+      }
+      const filled = applyPairParams(parsed);
+      autoStarted.current = true;
+      void pairWith({
+        hubUrl: filled.hub || hubUrlFromPairParams(parsed, session.hubBaseUrl),
+        code: filled.code || parsed.code,
+        pairId: filled.pairId || parsed.pairId,
+        deviceName,
+      }).then((ok) => {
+        if (!ok) autoStarted.current = false;
+      });
+    },
+    [applyPairParams, deviceName, pairWith, session.hubBaseUrl],
+  );
+
   const onCheckHealth = useCallback(async () => {
     setError(null);
     const base = normalizeHubBaseUrl(hubUrl);
     if (!base) {
       setError(
-        `Enter the Hub base URL first (e.g. ${HUB_URL_HINTS.ipv4}), then check health.`,
+        `Need a Hub URL from the QR (or enter one in Manual). Example: ${HUB_URL_HINTS.ipv4}`,
       );
+      setShowManual(true);
       return;
     }
     setBusy(true);
@@ -262,140 +321,182 @@ export function PairScreen({ navigation }: Props) {
     }
   }, [hubUrl, navigation, refreshFromStorage]);
 
+  const guideDefault = shouldShowTailscaleGuide({ beforePair: true });
+
   return (
     <KeyboardAvoidingView
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={insets.top}
     >
-      <View style={styles.content}>
-        <Text style={styles.title}>Pair with PC Hub</Text>
-        <Text style={styles.body}>
-          Hub must be running on the PC. No cloud login — this binds your phone to this PC only.
-        </Text>
-
-        <Pressable
-          style={styles.scanBtn}
-          onPress={() => setScanning(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Scan QR"
-          testID="pair-scan-qr"
-        >
-          <QrCode size={22} color={colors.accentText} strokeWidth={2} />
-          <Text style={styles.scanText}>Scan QR</Text>
-        </Pressable>
-        <Text style={styles.hint}>
-          On the PC open http://127.0.0.1:8787/pair — it shows the QR. Or enter the code below.
-        </Text>
-        <QrScanner
-          visible={scanning}
-          onClose={() => setScanning(false)}
-          onScan={(data) => {
-            setScanning(false);
-            const parsed = parsePairDeepLink(data);
-            if (!parsed?.code) {
-              setError('That QR is not a Cursor Mobile pairing code. Open 127.0.0.1:8787/pair on the PC.');
-              return;
-            }
-            applyPairParams(parsed);
-          }}
-        />
-
-        {shouldShowTailscaleGuide({ beforePair: true }) ? (
-          <View style={styles.guideBox} accessibilityLabel="Tailscale setup steps">
-            <Text style={styles.guideTitle}>{TAILSCALE_SETUP_TITLE}</Text>
-            <Text style={styles.body}>{TAILSCALE_SETUP_INTRO}</Text>
-            <Text style={styles.guideSteps}>{formatTailscaleSetupSteps()}</Text>
-          </View>
-        ) : null}
-
-        <Text style={styles.label}>Hub base URL (Tailscale)</Text>
-        <TextInput
-          style={styles.input}
-          value={hubUrl}
-          onChangeText={setHubUrl}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder={HUB_URL_HINTS.placeholder}
-          placeholderTextColor={colors.muted}
-          accessibilityLabel="Hub base URL"
-          testID="pair-hub-url"
-        />
-        <Text style={styles.hint}>
-          This PC: {HUB_URL_HINTS.ipv4}
-          {'\n'}
-          MagicDNS: {HUB_URL_HINTS.magicDns}
-          {'\n'}
-          Editable at runtime — rebuild not required to change Hub host.
-        </Text>
-
-        <Text style={styles.label}>Pair code</Text>
-        <TextInput
-          style={styles.input}
-          value={code}
-          onChangeText={setCode}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="number-pad"
-          placeholder="482913"
-          placeholderTextColor={colors.muted}
-          accessibilityLabel="Pair code"
-          testID="pair-code"
-        />
-
-        <Text style={styles.label}>Pair ID (optional, from QR)</Text>
-        <TextInput
-          style={styles.input}
-          value={pairId}
-          onChangeText={setPairId}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder="pair_…"
-          placeholderTextColor={colors.muted}
-          accessibilityLabel="Pair ID"
-          testID="pair-id"
-        />
-
-        <Text style={styles.label}>Device name</Text>
-        <TextInput
-          style={styles.input}
-          value={deviceName}
-          onChangeText={setDeviceName}
-          placeholder="Pixel"
-          placeholderTextColor={colors.muted}
-          accessibilityLabel="Device name"
-          testID="pair-device-name"
-        />
-
-        {error ? (
-          <Text style={styles.error} testID="pair-error">
-            {error}
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: insets.top + spacing.md,
+            paddingBottom: insets.bottom + spacing.xl,
+          },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+        testID="pair-scroll"
+      >
+        <CalmEnter>
+          <Text style={styles.title}>Pair with Hub</Text>
+          <Text style={styles.body}>
+            On the PC open {PC_PAIR_URL}, then scan that QR here. Hub URL and code come from the QR — you do not type them.
           </Text>
-        ) : null}
 
-        <Pressable
-          style={[styles.button, busy && styles.buttonDisabled]}
-          onPress={onPair}
-          disabled={busy}
-          accessibilityRole="button"
-          accessibilityLabel="Pair"
-          testID="pair-submit"
-        >
+          <Pressable
+            style={({ pressed }) => [styles.scanBtn, pressed && styles.pressed, busy && styles.buttonDisabled]}
+            onPress={() => setScanning(true)}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel="Scan QR"
+            testID="pair-scan-qr"
+          >
+            {busy ? (
+              <ActivityIndicator color={colors.accentText} />
+            ) : (
+              <>
+                <QrCode size={22} color={colors.accentText} strokeWidth={2} />
+                <Text style={styles.scanText}>Scan QR</Text>
+              </>
+            )}
+          </Pressable>
+
           {busy ? (
-            <ActivityIndicator color={colors.accentText} />
-          ) : (
-            <Text style={styles.buttonText}>Pair</Text>
-          )}
-        </Pressable>
+            <Text style={styles.status} accessibilityLiveRegion="polite">
+              Pairing with PC…
+            </Text>
+          ) : null}
 
-        <Pressable
-          onPress={onCheckHealth}
-          disabled={busy}
-          accessibilityRole="button"
-          accessibilityLabel="Check Hub health without pairing"
-        >
-          <Text style={styles.link}>Check Hub health without pairing</Text>
-        </Pressable>
-      </View>
+          {error ? (
+            <Text style={styles.error} testID="pair-error">
+              {error}
+            </Text>
+          ) : null}
+
+          <QrScanner visible={scanning} onClose={() => setScanning(false)} onScan={onScanQr} />
+
+          <Pressable
+            style={({ pressed }) => [styles.disclosure, pressed && styles.pressed]}
+            onPress={() => setShowTailscale((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showTailscale || guideDefault }}
+            accessibilityLabel="Tailscale setup"
+          >
+            <Text style={styles.disclosureText}>{TAILSCALE_SETUP_TITLE}</Text>
+            {showTailscale || guideDefault ? (
+              <ChevronUp size={18} color={colors.muted} />
+            ) : (
+              <ChevronDown size={18} color={colors.muted} />
+            )}
+          </Pressable>
+          {showTailscale || guideDefault ? (
+            <View style={styles.guideBox} accessibilityLabel="Tailscale setup steps">
+              <Text style={styles.bodyTight}>{TAILSCALE_SETUP_INTRO}</Text>
+              <Text style={styles.guideSteps}>{formatTailscaleSetupSteps()}</Text>
+            </View>
+          ) : null}
+
+          <Pressable
+            style={({ pressed }) => [styles.disclosure, pressed && styles.pressed]}
+            onPress={() => setShowManual((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showManual }}
+            accessibilityLabel="Enter code manually"
+            testID="pair-manual-toggle"
+          >
+            <Text style={styles.disclosureText}>
+              {showManual ? 'Hide manual entry' : 'Enter code manually'}
+            </Text>
+            {showManual ? (
+              <ChevronUp size={18} color={colors.muted} />
+            ) : (
+              <ChevronDown size={18} color={colors.muted} />
+            )}
+          </Pressable>
+
+          {showManual ? (
+            <View style={styles.manualBox} testID="pair-manual-form">
+              <Text style={styles.hint}>
+                Only if the camera cannot read the QR. Prefer Scan QR — it fills Hub address + code.
+              </Text>
+              <Text style={styles.label}>Hub base URL (Tailscale)</Text>
+              <TextInput
+                style={styles.input}
+                value={hubUrl}
+                onChangeText={setHubUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder={HUB_URL_HINTS.placeholder}
+                placeholderTextColor={colors.muted}
+                accessibilityLabel="Hub base URL"
+                testID="pair-hub-url"
+              />
+              <Text style={styles.hint}>
+                Example: {HUB_URL_HINTS.ipv4} · {HUB_URL_HINTS.magicDns}
+              </Text>
+
+              <Text style={styles.label}>Pair code</Text>
+              <TextInput
+                style={styles.input}
+                value={code}
+                onChangeText={setCode}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="number-pad"
+                placeholder="482913"
+                placeholderTextColor={colors.muted}
+                accessibilityLabel="Pair code"
+                testID="pair-code"
+              />
+
+              <Text style={styles.label}>Device name</Text>
+              <TextInput
+                style={styles.input}
+                value={deviceName}
+                onChangeText={setDeviceName}
+                placeholder="Pixel"
+                placeholderTextColor={colors.muted}
+                accessibilityLabel="Device name"
+                testID="pair-device-name"
+              />
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.button,
+                  busy && styles.buttonDisabled,
+                  pressed && !busy && styles.pressed,
+                ]}
+                onPress={onPair}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="Pair with Hub"
+                testID="pair-submit"
+              >
+                {busy ? (
+                  <ActivityIndicator color={colors.accentText} />
+                ) : (
+                  <Text style={styles.buttonText}>Pair with Hub</Text>
+                )}
+              </Pressable>
+
+              <Pressable
+                onPress={onCheckHealth}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="Check Hub health without pairing"
+                style={({ pressed }) => [pressed && styles.pressed]}
+              >
+                <Text style={styles.link}>Check Hub health without pairing</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </CalmEnter>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -407,96 +508,127 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     minHeight: 56,
-    borderRadius: 999,
+    borderRadius: radii.pill,
     backgroundColor: colors.accent,
-    marginTop: 16,
+    marginTop: spacing.sm,
   },
-  scanText: { color: colors.accentText, fontSize: 18, fontWeight: '700' },
+  scanText: { color: colors.accentText, fontSize: 18, fontWeight: '600' },
   root: {
     flex: 1,
     backgroundColor: colors.bg,
   },
   content: {
-    flex: 1,
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
     gap: spacing.sm,
-    justifyContent: 'center',
+    flexGrow: 1,
   },
   title: {
     color: colors.text,
-    fontSize: 24,
-    fontWeight: '700',
+    fontSize: type.title,
+    fontWeight: '600',
     marginBottom: spacing.xs,
   },
   body: {
     color: colors.muted,
-    fontSize: 14,
+    fontSize: type.body,
+    lineHeight: 24,
+    marginBottom: spacing.sm,
+  },
+  bodyTight: {
+    color: colors.muted,
+    fontSize: type.meta,
     lineHeight: 20,
-    marginBottom: spacing.md,
+  },
+  status: {
+    color: colors.accent,
+    fontSize: type.meta,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+  },
+  disclosure: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  disclosureText: {
+    color: colors.text,
+    fontSize: type.body,
+    fontWeight: '600',
+  },
+  manualBox: {
+    gap: spacing.sm,
+    paddingBottom: spacing.md,
   },
   guideBox: {
-    marginBottom: spacing.md,
     padding: spacing.md,
-    borderRadius: 8,
+    borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
     gap: spacing.xs,
   },
-  guideTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
   guideSteps: {
     color: colors.text,
-    fontSize: 13,
+    fontSize: type.meta,
     lineHeight: 20,
   },
   label: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: type.meta,
     marginTop: spacing.xs,
   },
   hint: {
     color: colors.muted,
-    fontSize: 11,
-    lineHeight: 16,
-    marginBottom: spacing.xs,
+    fontSize: type.meta,
+    lineHeight: 18,
   },
   input: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: radii.sm,
     color: colors.text,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    fontSize: 16,
+    fontSize: type.body,
+    minHeight: 44,
   },
   button: {
     marginTop: spacing.md,
     backgroundColor: colors.accent,
-    borderRadius: 8,
+    borderRadius: radii.sm,
     paddingVertical: spacing.md,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   buttonDisabled: {
     opacity: 0.6,
   },
   buttonText: {
     color: colors.accentText,
-    fontWeight: '700',
-    fontSize: 16,
+    fontWeight: '600',
+    fontSize: type.body,
   },
   link: {
     color: colors.muted,
     textAlign: 'center',
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     textDecorationLine: 'underline',
+    fontSize: type.meta,
+    minHeight: 44,
+    paddingVertical: spacing.sm,
   },
   error: {
     color: colors.danger,
     marginTop: spacing.sm,
+    fontSize: type.meta,
+    lineHeight: 20,
+  },
+  pressed: {
+    opacity: 0.85,
   },
 });

@@ -2,6 +2,7 @@ import { NotificationsCard } from '../components/NotificationsCard';
 import { SecurityCard } from '../components/SecurityCard';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -152,9 +153,24 @@ export function AccountScreen({ navigation }: Props) {
     await refreshFromStorage();
   };
 
-  const unpair = async () => {
-    await clearDevice();
-    navigation.replace('Pair');
+  const unpair = () => {
+    Alert.alert(
+      'Clear pairing',
+      "Remove this phone's trust with the PC Hub? You will need a new pair code.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear pairing',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              await clearDevice();
+              navigation.replace('Pair');
+            })();
+          },
+        },
+      ],
+    );
   };
 
   const projectName =
@@ -184,9 +200,9 @@ export function AccountScreen({ navigation }: Props) {
         <Row title="Status" meta={connectionStateLabel(connectionState)} />
         <Row
           title="How it works"
-          meta="On the PC open 127.0.0.1:8787/pair to show a QR; on this phone tap Pair a PC → Scan QR. Cursor stays on the PC — the phone is a remote over Tailscale."
+          meta="On the PC, open http://127.0.0.1:8787/pair in a browser — that page shows the QR. On this phone tap Pair with Hub → Scan QR. Do not type that loopback URL on the phone. Cursor stays on the PC; the phone is remote UI over Tailscale."
         />
-        <ActionRow label="Pair a PC" onPress={() => navigation.navigate('Pair')} testID="account-repair" />
+        <ActionRow label="Pair with Hub" onPress={() => navigation.navigate('Pair')} testID="account-repair" />
       </View>
 
       <Text style={styles.section}>Computer</Text>
@@ -252,7 +268,7 @@ export function AccountScreen({ navigation }: Props) {
       <View style={styles.card}>
         <ActionRow label="Health details" onPress={() => navigation.navigate('Health')} testID="account-health" />
         <ActionRow label="Browse PC files" meta="Workspace roots only" onPress={() => navigation.navigate('Editor')} testID="account-editor" />
-        <ActionRow label="Clear pairing" danger onPress={() => void unpair()} testID="account-unpair" />
+        <ActionRow label="Clear pairing" danger onPress={unpair} testID="account-unpair" />
       </View>
     </ScrollView>
   );

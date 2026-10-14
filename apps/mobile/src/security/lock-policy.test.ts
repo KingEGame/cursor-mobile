@@ -20,9 +20,10 @@ describe('shouldRelock', () => {
 });
 
 describe('parseLockSettings', () => {
-  it('defaults to lock-on-send and survives bad stored data', () => {
-    assert.deepEqual(parseLockSettings(null), { lockSend: true, lockOpen: false });
-    assert.deepEqual(parseLockSettings('{"lockOpen":true}'), { lockSend: true, lockOpen: true });
-    assert.deepEqual(parseLockSettings('nope'), { lockSend: true, lockOpen: false });
+  it('defaults lockSend off (feature paused) and survives bad stored data', () => {
+    assert.deepEqual(parseLockSettings(null), { lockSend: false, lockOpen: false });
+    assert.deepEqual(parseLockSettings('{"lockOpen":true}'), { lockSend: false, lockOpen: true });
+    assert.deepEqual(parseLockSettings('{"lockSend":true}'), { lockSend: false, lockOpen: false });
+    assert.deepEqual(parseLockSettings('nope'), { lockSend: false, lockOpen: false });
   });
 });

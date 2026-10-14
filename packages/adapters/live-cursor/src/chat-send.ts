@@ -18,6 +18,7 @@ import type { ActionSelector } from "./selector-pack.js";
 import { applyComposerOptions, type AgentMode } from "./composer-options.js";
 import { insertMentions, type MentionRef } from "./mentions.js";
 import { pasteImages, removePastedImages, type PastedImage } from "./images.js";
+import { ensureCursorWindowRaised } from "./raise-cursor-window.js";
 
 /** Optional composer settings applied (and verified) before the text is typed. */
 export interface ComposerSendOptions {
@@ -137,7 +138,9 @@ export type ChatSendResult =
         | "EDIT_FAILED"
         | "MENTION_NOT_APPLIED"
         | "IMAGE_NOT_ATTACHED"
-        | "COMPOSER_NOT_EMPTY";
+        | "COMPOSER_NOT_EMPTY"
+        /** Cursor window minimized / not visible — CDP Input cannot land. */
+        | "CURSOR_WINDOW_HIDDEN";
       error: string;
       methods: string[];
     };
@@ -256,8 +259,18 @@ export async function sendToAgentChat(
   composerId: string,
   text: string,
   sendSelector: ActionSelector,
-  opts: { wait?: Wait; switchTimeoutMs?: number; composer?: ComposerSendOptions } = {},
+  opts: {
+    wait?: Wait;
+    switchTimeoutMs?: number;
+    composer?: ComposerSendOptions;
+    /** CDP target id for Target.activateTarget (Agents page). */
+    targetId?: string | null;
+  } = {},
 ): Promise<ChatSendResult> {
+  const raised = await ensureCursorWindowRaised(client, { targetId: opts.targetId });
+  if (!raised.ok) {
+    return { ok: false, code: raised.code, error: raised.error, methods: raised.methods };
+  }
   const opened = await openAgentChat(client, composerId, opts);
   if (!opened.ok) return opened;
   // Let the composer for the newly opened chat mount before focusing its input.
@@ -278,8 +291,12 @@ export const STOP_GENERATION_SELECTORS = ['[aria-label="Stop generation"]'];
 export async function stopAgentChat(
   client: CdpClient,
   composerId: string,
-  opts: { wait?: Wait; switchTimeoutMs?: number } = {},
+  opts: { wait?: Wait; switchTimeoutMs?: number; targetId?: string | null } = {},
 ): Promise<ChatSendResult> {
+  const raised = await ensureCursorWindowRaised(client, { targetId: opts.targetId });
+  if (!raised.ok) {
+    return { ok: false, code: raised.code, error: raised.error, methods: raised.methods };
+  }
   const opened = await openAgentChat(client, composerId, opts);
   if (!opened.ok) return opened;
   if (opened.switched) await (opts.wait ?? realWait)(250);
@@ -314,9 +331,18 @@ export async function newAgentChat(
   sectionId: string,
   text: string,
   sendSelector: ActionSelector,
-  opts: { wait?: Wait; timeoutMs?: number; composer?: ComposerSendOptions } = {},
+  opts: {
+    wait?: Wait;
+    timeoutMs?: number;
+    composer?: ComposerSendOptions;
+    targetId?: string | null;
+  } = {},
 ): Promise<ChatSendResult> {
-  const methods: string[] = [];
+  const raised = await ensureCursorWindowRaised(client, { targetId: opts.targetId });
+  if (!raised.ok) {
+    return { ok: false, code: raised.code, error: raised.error, methods: raised.methods };
+  }
+  const methods: string[] = [...raised.methods];
   const wait = opts.wait ?? realWait;
   const section = `section[data-agent-drop-section-id=${JSON.stringify(sectionId)}]`;
   const rowKeys = `[...document.querySelectorAll(${JSON.stringify(`${section} li[data-sidebar-item-key^="row:"]`)})].map((li) => li.getAttribute("data-sidebar-item-key").slice(4))`;
@@ -446,10 +472,14 @@ export async function editAgentMessage(
   composerId: string,
   bubbleId: string,
   text: string,
-  opts: { wait?: Wait; switchTimeoutMs?: number } = {},
+  opts: { wait?: Wait; switchTimeoutMs?: number; targetId?: string | null } = {},
 ): Promise<ChatSendResult> {
   if (!BUBBLE_ID.test(bubbleId)) {
     return { ok: false, code: "MESSAGE_NOT_FOUND", error: "Not a Cursor message id", methods: [] };
+  }
+  const raised = await ensureCursorWindowRaised(client, { targetId: opts.targetId });
+  if (!raised.ok) {
+    return { ok: false, code: raised.code, error: raised.error, methods: raised.methods };
   }
   const wait = opts.wait ?? realWait;
   const opened = await openAgentChat(client, composerId, opts);

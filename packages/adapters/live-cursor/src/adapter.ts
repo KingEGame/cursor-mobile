@@ -941,7 +941,7 @@ export class LiveCursorAdapterImpl implements LiveCursorAdapter {
         composerId,
         text,
         this.selectorPack.pack.actions.send_message,
-        { composer },
+        { composer, targetId: this.windows[0]?.targetId ?? null },
       );
     } finally {
       await client.close().catch(() => undefined);
@@ -983,6 +983,7 @@ export class LiveCursorAdapterImpl implements LiveCursorAdapter {
     try {
       return await newAgentChatRun(client, sectionId, text, this.selectorPack.pack.actions.send_message, {
         composer,
+        targetId: this.windows[0]?.targetId ?? null,
       });
     } finally {
       await client.close().catch(() => undefined);
@@ -1010,7 +1011,9 @@ export class LiveCursorAdapterImpl implements LiveCursorAdapter {
       };
     }
     try {
-      return await editAgentMessageRun(client, composerId, bubbleId, text);
+      return await editAgentMessageRun(client, composerId, bubbleId, text, {
+        targetId: this.windows[0]?.targetId ?? null,
+      });
     } finally {
       await client.close().catch(() => undefined);
     }
@@ -1064,7 +1067,9 @@ export class LiveCursorAdapterImpl implements LiveCursorAdapter {
       };
     }
     try {
-      return await stopAgentChatRun(client, composerId);
+      return await stopAgentChatRun(client, composerId, {
+        targetId: this.windows[0]?.targetId ?? null,
+      });
     } finally {
       await client.close().catch(() => undefined);
     }

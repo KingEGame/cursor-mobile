@@ -135,8 +135,9 @@ Scaffold directories exist; treat Hub routes and adapter behaviors as **designed
 - Prefer exhaustive TOR-level detail under `docs/reports/tor/` when expanding specs; update existing architecture/feature docs instead of adding parallel conflicting ones.
 - When moving past design, prioritize implementing and testing the documented Phase 0→1 path (not cloud alternatives).
 - **CDP on the current main Cursor window only** — quit Cursor → `npm run start:cursor:cdp` → same window/workspace → Composer → `npm run verify:cdp`. **HARD BAN:** never launch Cursor with `--user-data-dir=/tmp/cursor-mobile-cdp-profile` or any alternate `--user-data-dir`; never kill main Cursor from automation. Agents must not `nohup` a second window as a CDP workaround.
-- Prefer plan-first mobile UX: agree screen map and UI-SPEC (what each screen shows and how navigation works) before implementing app UI.
-- Prefer a clean, phone-first Gemini-like shell: Chats grouped by PC-open projects → sessions, bottom Chats|Account nav, quiet connection indicator, lean composer (extras behind `+`), reduced chrome — not the denser current UI.
+- Prefer plan-first mobile UX: lock screen map and UI-SPEC (what each screen shows and how navigation works) before implementing app UI; say approve/build before coding screens.
+- Prefer **Cursor IDE chrome** as the phone north star (not a denser custom shell): Home = sidebar (New Chat, Search, Projects → nested sessions); Live chat = composer with circular `+` (modes / Files / Model / MCP), mode chips, Working/Queued, Hub-backed Model panel; Account = connect / pick one paired PC + Refresh now; light calm grayscale + system fonts; hide New Project, Getting Started, and Slack/promo chrome.
+- Phone session list and model choices must stay in sync with the selected PC’s Hub/Composer (Tailscale → Hub; models from Hub/`CURSOR_MODELS` or live adapter — never a hard-coded cloud catalog in the APK).
 
 ## Learned Workspace Facts
 
@@ -148,4 +149,4 @@ Scaffold directories exist; treat Hub routes and adapter behaviors as **designed
 - **PC Tailscale is already installed and used** — not a blocker. Pixel 7 has official Tailscale sideloaded; **operator login / join `tail246b3f` still required** before mesh UAT. Active PC node (2026-09-30): `100.108.160.99` / `kingwarpc-1.tail246b3f.ts.net` (do not bake older offline peer IPs into the APK). Hub mesh: `HUB_HOST=0.0.0.0`; `POST /v1/pair/start` remains **loopback-only**.
 - **Local release APK exists** (2026-09-25): `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`; companion sideloaded on Pixel (`local.cursor.mobile`).
 - TOR-08 P0 Pass sheet **GOAL_COMPLETE=yes** (2026-10-01): all **96** P0 ACs Pass · MANUAL_ONLY **0%** · AC-X-01 Pass under fail-closed Expected (Hub create-queue HTTP 202 when `cursor_down`; Composer/CDP when `cdp_ok`; CDP never public). FR-041 history-list row click remains optional non-P0 metal.
-- Phase 5 mobile UX contract: `.planning/phases/05-mobile-ux-contract/05-UI-SPEC.md` + `05-UI-REVIEW.md` (**7/7 PASS**, 2026-10-01); plan-first — no further app UI implementation until user approves the screen plan / plan-phase.
+- Phase 5 mobile UX contract is **plan_locked** (2026-10-01): `.planning/phases/05-mobile-ux-contract/05-UI-SPEC.md` amendments A–F (Cursor sidebar/chat/Settings, QR pair PC→phone, session parity, away-from-PC comfort) + `05-UI-REVIEW.md`; await user approve→build before further app UI implementation. Pair primary path = Hub QR on PC, phone Scan QR.

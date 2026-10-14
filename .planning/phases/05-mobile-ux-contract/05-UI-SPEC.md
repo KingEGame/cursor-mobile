@@ -1,10 +1,10 @@
 ---
 phase: "5"
 slug: "mobile-ux-contract"
-status: plan_locked
-reviewed_at: "2026-10-01T19:45:00Z"
-amended_at: "2026-10-01"
-amendment: "A–F locked; F = away-from-PC comfort (notifications, status, approvals v2, changes, app lock, Hub prerequisites); ready for user approve→build"
+status: approved
+reviewed_at: "2026-10-14T07:45:00Z"
+amended_at: "2026-10-14"
+amendment: "A–G locked + checker APPROVED; G P0 metal (Pair scroll/steps, Hub console /pair, PC hero) shipped 2026-10-14; remaining Phase 5 chrome still approve→build"
 shadcn_initialized: false
 preset: none
 created: "2026-10-01"
@@ -22,7 +22,8 @@ product_locks: "PC-local Hub · open-project remote · Tailscale+pair · CDP 127
 > **Amendment C (2026-10-01):** Account → **Cursor Settings–format** screen focused on **connect phone ↔ Cursor PC**, **choose one PC**, and **Refresh now** (pull workspace + chat sessions from that Hub).  
 > **Amendment D (2026-10-01):** Pair → **primary path = PC shows QR, phone scans with camera** (`cursor-companion://pair` from Hub `qrPayload`). Manual code entry is fallback.  
 > **Amendment E (2026-10-01):** **Connectivity + session parity** — phone Home must show the same PC-bound Composer sessions as Cursor on that computer; Sync / Refresh now / focus / WS keep the list honest. Checker must re-verify — see `05-UI-REVIEW.md`.  
-> **Amendment F (2026-10-01):** **Away-from-PC comfort** — Hub prerequisites (live transcript stream, real approval detection, Stop), local notifications (no FCM), per-chat status + approvals badge, approval card v2, Changes card + read-only diff, app lock, PC reachability, drafts/send retry. Source: [`mobile-ux-comfort-gap-audit-2026-10-01.md`](../../../docs/reports/mobile-ux-comfort-gap-audit-2026-10-01.md). Checker must re-verify.
+> **Amendment F (2026-10-01):** **Away-from-PC comfort** — Hub prerequisites (live transcript stream, real approval detection, Stop), local notifications (no FCM), per-chat status + approvals badge, approval card v2, Changes card + read-only diff, app lock, PC reachability, drafts/send retry. Source: [`mobile-ux-comfort-gap-audit-2026-10-01.md`](../../../docs/reports/mobile-ux-comfort-gap-audit-2026-10-01.md). Checker must re-verify.  
+> **Amendment G (2026-10-14):** **Scroll + pair URL discoverability + calm RN motion** — (1) Any screen whose content can exceed the viewport MUST use `ScrollView` / keyboard-aware scroll with safe-area padding — never `flex:1` + `justifyContent:'center'` alone for multi-field forms (**PairScreen** is P0 offender). (2) Primary operator path = open browser on PC to **`http://127.0.0.1:8787/pair`** (loopback-only Hub page); Hub startup console prints this URL prominently; PC `/pair` hero says open on PC / do not type on phone; phone Pair shows numbered steps card above the fold (not 11px footer hint); Account How it works same language; manual Hub URL+code remains fallback. (3) RN motion: 1–2 meaningful micro-interactions per screen max; honor Reduce Motion; transform/opacity only; FlatList for long session lists; no decorative infinite loops. Product locks unchanged (PC-local, Tailscale+pair, CDP localhost, Expo APK client-only, light calm grayscale). Checker must re-verify.
 
 ---
 
@@ -36,7 +37,7 @@ User asked for a **plan first**: which screens exist, what each does/shows, how 
 
 **Settings / Account north star (amended):** Account tab mirrors **Cursor Settings → General** card layout (section headers + rounded cards + toggles / dropdowns / primary buttons) — but content is **companion connection**, not Cursor billing or cloud agents: pick **one PC Hub** on the Tailscale mesh, see how to connect, and **Refresh now** to reload workspace + chat sessions from that computer immediately.
 
-**Pair north star (amended):** Correct connect path is **optical**: Hub on the **PC** starts pairing (**loopback-only** `POST /pair/start`) and **displays a QR** encoding `cursor-companion://pair?host=&port=&code=&pairId=`. Phone opens **Scan QR** (camera), reads the code, completes pair over **Tailscale** to that Hub. Manual Hub URL + code remains fallback. Phone never dials CDP.
+**Pair north star (amended D + G):** Correct connect path is **optical via a PC browser page**: operator on the **PC** opens **`http://127.0.0.1:8787/pair`** (loopback-only Hub page; same host constraint as `POST /pair/start`). That page starts pairing and **displays a QR** encoding `cursor-companion://pair?host=&port=&code=&pairId=`. Phone Pair screen shows a **numbered steps card above the fold** (1 On PC open URL · 2 On phone Scan QR), then **Scan QR** (camera). Manual Hub URL + code remains fallback. Phone never dials CDP; never instructs the operator to type `127.0.0.1` on the phone.
 
 **Sync / parity north star (amended):** Connectivity is Tailscale → Hub → (live CDP when `cdp_ok`) + local History Index. The **session list on the phone must match the PC-open workspace’s Composer chats** (live + history from Hub), not a cloud catalog. Operator can force **Refresh now** / pull-to-refresh; Home refreshes on focus and on Hub WS health/session events. Stale history index must be visible (parity hint), never silently invent sessions.
 
@@ -164,6 +165,10 @@ Home specifics: section headers (“Projects”, “Repositories”) use **Label
 | Element | Copy |
 |---------|------|
 | Primary CTA (pair) | **Scan QR** (fallback: **Pair with Hub**) |
+| Pair steps card (G) | **1. On PC** — Open `http://127.0.0.1:8787/pair` in a browser on the computer (shows QR). · **2. On phone** — Tap **Scan QR** and aim at that QR. |
+| Pair steps a11y (G) | `accessibilityLabel="Pairing steps: open pair page on PC, then scan QR on phone"` |
+| PC /pair hero (G) | **Open this page on the PC — do not type this URL on the phone** |
+| Hub startup console (G) | Print prominently: `Pair on PC: http://127.0.0.1:8787/pair` (loopback-only; same line family as listen banner) |
 | Primary CTA (home top) | **New Chat** |
 | Primary CTA (chats empty, bound) | **New Chat** |
 | Primary CTA (new session) | **Create chat** |
@@ -221,7 +226,7 @@ Full connection strings live in `apps/mobile/src/hub/connection-state.ts` (`conn
 
 | Screen | Primary visual anchor (eye first) | Secondary |
 |--------|-----------------------------------|-----------|
-| Pair | **Scan QR** camera CTA + form fallback | Tailscale guide below |
+| Pair | Numbered steps card (PC URL → Scan QR) + **Scan QR** CTA | Manual Hub URL/code fallback; Tailscale guide in scroll |
 | Health | Health status rows + **Continue to Chats** | Refresh / Re-pair |
 | **Home (Chats)** | Nested Repositories → session list | New Chat + Search; profile footer |
 | **Opened chat (Live)** | Latest transcript / streaming agent block | ApprovalCard when present; composer (`+` / mode chip / Model / Send·Stop) |
@@ -278,7 +283,7 @@ flowchart TB
 | Row | Shows | Control |
 |-----|-------|---------|
 | **Status** | Online / Degraded / Offline / Pair (same tones as ConnectionChip) | Read-only + optional HealthDot |
-| **How it works** | Short copy: On the **PC**, Hub shows a **pairing QR**. On the **phone**, tap **Scan QR**. Phone ↔ **Tailscale** ↔ **Hub** ↔ Cursor (CDP stays on PC). | Static helper text |
+| **How it works** | Short copy (Amendment G): On the **PC**, open **`http://127.0.0.1:8787/pair`** in a browser — that page shows the QR. On the **phone**, tap **Scan QR**. Do **not** type that loopback URL on the phone. Phone ↔ **Tailscale** ↔ **Hub** ↔ Cursor (CDP stays on PC). | Static helper text |
 | **Pair with Hub** | When unpaired or switching PC | CTA → Pair screen (**Scan QR** primary) |
 
 #### 2. Computer — choose one PC
@@ -354,7 +359,7 @@ sequenceDiagram
 | Computer row | **Computer** · helper: “Sessions and project come from this PC’s Hub.” |
 | Refresh CTA | **Refresh now** |
 | Refresh helper | **Reload workspace and chat sessions from the selected computer.** |
-| How it works | **On the PC, show the Hub pairing QR. On this phone, tap Scan QR. Cursor stays on the PC — the phone is remote UI only.** |
+| How it works | **On the PC, open http://127.0.0.1:8787/pair in a browser — it shows the pairing QR. On this phone, tap Scan QR. Do not type that URL on the phone. Cursor stays on the PC — the phone is remote UI only.** |
 | Empty PC list | **No computers saved** · Body: Pair with a Hub on your PC first. · CTA: **Pair with Hub** |
 
 ### Non-goals on this screen
@@ -411,6 +416,8 @@ flowchart LR
 ```
 
 ### Component inventory (this screen)
+
+Enumerated by gsd-ui-researcher from locked Home north star + `apps/mobile/src/screens/ChatsHomeScreen.tsx` — 9 components — apps/mobile@local — 2026-10-14.
 
 | Component | Role | Notes |
 |-----------|------|-------|
@@ -655,15 +662,17 @@ Primary connect path for the companion. Aligns phone to **this PC’s Hub** (and
 ```mermaid
 sequenceDiagram
   participant Op as Operator
-  participant PC as Hub on PC
+  participant Browser as PC browser 127.0.0.1:8787/pair
+  participant Hub as Hub on PC
   participant Phone as APK Pair
-  Op->>PC: POST /pair/start on 127.0.0.1 only
-  PC-->>Op: code + qrPayload URI
-  PC->>Op: Show QR on PC screen
-  Op->>Phone: Aim camera at QR
+  Op->>Hub: Start Hub (console prints /pair URL)
+  Op->>Browser: Open http://127.0.0.1:8787/pair
+  Browser->>Hub: GET /pair (loopback-only)
+  Hub-->>Browser: QR + code + TTL
+  Op->>Phone: See steps card · tap Scan QR · aim at PC QR
   Phone->>Phone: Parse cursor-companion://pair
-  Phone->>PC: POST /pair/complete over Tailscale
-  PC-->>Phone: deviceToken
+  Phone->>Hub: POST /pair/complete over Tailscale
+  Hub-->>Phone: deviceToken
   Phone->>Phone: Save Hub URL + token → Health
 ```
 
@@ -671,52 +680,69 @@ sequenceDiagram
 
 | Lock | Meaning |
 |------|---------|
-| `pair/start` | **Loopback-only on PC** — phone must not call start |
+| `pair/start` + `GET /pair` | **Loopback-only on PC** — phone must not call start or load `/pair` |
+| Operator entry URL | **`http://127.0.0.1:8787/pair`** — open in a **PC** browser; never the phone’s default Hub URL field |
 | QR payload | `cursor-companion://pair?host=&port=&code=&pairId=` from Hub `buildQrPayload` |
-| Host in QR | Tailscale hostname / mesh IP (`TAILSCALE_HOSTNAME`) — **not** public internet; avoid advertising `127.0.0.1` to the phone |
+| Host in QR | Tailscale hostname / mesh IP (`TAILSCALE_HOSTNAME`) — **not** public internet; avoid advertising `127.0.0.1` to the phone as the mesh Hub |
 | Complete | Phone → Hub over **Tailscale** with code |
 | CDP | Never in QR; never dialed from phone |
+
+### Scroll contract (Amendment G — Pair is P0)
+
+| Rule | Contract |
+|------|----------|
+| When | Content **can** exceed viewport (Pair form + keyboard, Account with many cards, Tailscale guide, any multi-field form) |
+| Required | Outer **`ScrollView`** (or keyboard-aware scroll wrapper) with **safe-area** top/bottom padding; keyboard dismiss on drag where RN supports it |
+| Forbidden | Relying on `flex:1` + `justifyContent:'center'` alone for multi-field forms — **P0 offender today:** `PairScreen` (`content` styles) |
+| Keyboard | Keep `KeyboardAvoidingView` **or** keyboard-aware scroll; fields near bottom must remain reachable when IME open |
+| Account / guides | Same rule: Settings cards column and Tailscale guide expand inside scroll — never clip primary CTAs below the fold without scroll |
 
 ### Phone UI (Pair screen)
 
 | Element | Behavior |
 |---------|----------|
+| **Steps card (G)** | Above the fold, body/label typography (not 11px footer hint): numbered **1. On PC** open `http://127.0.0.1:8787/pair` · **2. On phone** tap **Scan QR**. Card uses secondary surface + border; sits **above** Scan QR |
 | **Scan QR** | Primary CTA — opens camera scanner (permission prompt once) |
 | Viewfinder | Full-bleed or card; success haptic + auto-advance to complete |
-| Manual fallback | Hub URL + pair code (+ optional pair ID) + **Pair with Hub** |
-| Tailscale guide | When mesh likely down |
+| Manual fallback | Collapsed or below fold: Hub URL + pair code (+ optional pair ID) + **Pair with Hub** — not the primary discoverability path |
+| Tailscale guide | When mesh likely down — inside the same ScrollView |
 | After success | Navigate **Health** (or skip-to-Home if Q2 resolves that way) |
 
-### PC UI (operator)
+**Do not:** bury the PC URL in an 11px muted `hint` under Scan QR as the only instruction (current PairScreen anti-pattern).
+
+### PC UI (operator) — Amendment G
 
 | Element | Behavior |
 |---------|----------|
-| **Show pairing QR** | After `POST /pair/start`, render QR image of `qrPayload` on the **PC** (local Hub operator page / CLI print / small desktop window) |
-| Code + TTL | Show human-readable code + expiry under QR |
-| Refresh QR | New `pair/start` invalidates previous code |
+| **Hub startup console** | On listen, print **prominently** (own line, hard to miss beside listen banner): `Pair on PC: http://127.0.0.1:8787/pair` (port from config). Optional second line: “Open that URL in a browser on this PC — not on the phone.” |
+| **`GET /pair` page hero** | First visible copy must include: **Open this page on the PC — do not type this URL on the phone.** Then short phone instruction: open companion → **Scan QR**. Keep light calm grayscale (match `#f4f5f7` / `#ffffff` / muted text). |
+| **Show pairing QR** | Page starts pairing (loopback) and renders QR of `qrPayload` |
+| Code + TTL | Human-readable code + expiry under QR |
+| Refresh QR | New code via reload / “New code” link invalidates previous |
 
-**Designed:** Dedicated loopback Hub page e.g. `http://127.0.0.1:8787/pair` that starts pairing and draws the QR (operator-only). Today: API returns `qrPayload`; operator may generate QR externally — **must** become first-class PC display.
+**Status (metal):** Loopback Hub page `packages/hub/src/pair-page.ts` **exists** with Amendment G hero (“keep this page open on the PC”). Hub CLI prints `PAIR PHONE → …/pair`. Phone PairScreen: ScrollView + steps card + Scan QR (2026-10-14).
 
-### Phone camera status
+### Phone camera / PC page status
 
 | Piece | Status |
 |-------|--------|
 | Hub `qrPayload` + deep-link parse + manual code PairScreen | **Implemented** |
-| In-app **camera QR scanner** on Pair | **Planned** (not in APK yet — deep link / paste only) |
-| PC Hub page that **shows** the QR | **Planned** (operator today uses curl + external QR or typed code) |
+| In-app **camera QR scanner** on Pair | **Implemented** (verify on device; keep as primary CTA) |
+| PC Hub page that **shows** the QR | **Implemented** (`GET /pair` loopback) — **G polish:** hero copy + Hub console URL line |
+| Pair **ScrollView** + steps card above fold | **Implemented (G P0, 2026-10-14)** — ScrollView + numbered steps + Scan QR |
 
 ### Errors
 
 | Case | Copy / action |
 |------|----------------|
 | Camera permission denied | Guide to enable camera; offer **Enter code instead** |
-| Invalid / expired QR | **Code expired — generate a new QR on the PC** |
+| Invalid / expired QR | **Code expired — generate a new QR on the PC** (open `http://127.0.0.1:8787/pair` again) |
 | Hub unreachable after scan | Tailscale guide + retry; keep parsed fields |
-| `pair/start` from phone | Must never be offered in UI |
+| `pair/start` or `/pair` from phone | Must never be offered as a phone-navigable URL; steps card clarifies PC-only |
 
 ### Link from Settings
 
-Account **Connection** card → **Pair with Hub** / **Re-pair** opens this screen. **How it works** copy should mention: “On the PC, show the Hub pairing QR; on the phone, tap **Scan QR**.”
+Account **Connection** card → **Pair with Hub** / **Re-pair** opens this screen. **How it works** uses the same Amendment G language as the Pair steps card (PC `/pair` URL · phone Scan QR · do not type loopback on phone).
 
 ---
 
@@ -900,11 +926,61 @@ Uses on-device biometric/PIN API only; no account, no cloud.
 
 ---
 
+## Amendment G — Scroll, pair URL discoverability, calm RN motion (2026-10-14)
+
+> **Why:** Operators cannot complete pair when PairScreen clips under keyboard/short viewports; they also miss that the QR lives on a **PC loopback** page. Motion must stay calm RN micro-feedback — not SwiftUI kits or dark OLED systems.  
+> **Locks unchanged:** PC-local Hub, Tailscale+pair, CDP `127.0.0.1`, Expo APK remote UI only, light calm grayscale Cursor chrome.
+
+```mermaid
+flowchart TB
+  HubStart["Hub startup console"] -->|"prints Pair on PC: http://127.0.0.1:8787/pair"| Op["Operator on PC"]
+  Op --> Browser["PC browser GET /pair"]
+  Browser -->|"hero: open on PC — do not type on phone"| QR["QR + code"]
+  Phone["Phone Pair ScrollView"] -->|"steps card 1 PC URL · 2 Scan QR"| Scan["Scan QR"]
+  Scan --> Complete["pair/complete over Tailscale"]
+```
+
+### G1 — Scroll (all overflowing screens)
+
+| Surface | Contract |
+|---------|----------|
+| Pair (P0) | Replace center-only flex column with ScrollView / keyboard-aware scroll + safe-area; keep Scan QR + steps card reachable |
+| Account | Settings cards in a single scroll column (already intended) — enforce when many cards / Security / Notifications |
+| Forms + keyboard | New chat, manual pair fields — never rely on centered flex alone |
+| Tailscale guide | Lives inside scroll; must not push primary CTA permanently off-screen without scroll |
+
+### G2 — PC pairing URL discoverability
+
+| Surface | Contract |
+|---------|----------|
+| Hub CLI / listen | Prominent console line with `http://127.0.0.1:{port}/pair` |
+| PC `/pair` HTML | Hero: **Open this page on the PC — do not type this URL on the phone** |
+| Phone Pair | Numbered steps card **above the fold** (Body/Label — not 11px hint) |
+| Account How it works | Same PC-URL → Scan QR language |
+| Fallback | Manual Tailscale Hub URL + code still available |
+
+### G3 — Calm RN motion
+
+See **Motion Notes** hard caps. Cap ≤2 motions/screen; Reduce Motion; FlatList for long Home lists; no decorative infinite loops.
+
+### G — Implemented vs planned
+
+| Piece | Status |
+|-------|--------|
+| Hub `GET /pair` QR page (loopback) | **Implemented** — hero G copy **Planned** |
+| Hub startup console `/pair` URL | **Implemented (2026-10-14)** |
+| Pair camera Scan QR | **Implemented** |
+| Pair ScrollView + steps card | **Implemented (P0, 2026-10-14)** |
+| Account How it works G copy | **Planned** (Settings rebuild) |
+| Motion hard caps in app chrome | **Planned** |
+
+---
+
 ## Screen Inventory
 
 | Screen | Route | Purpose | Primary content | Entry points | Status |
 |--------|-------|---------|-----------------|--------------|--------|
-| Pair | `Pair` | Trust phone ↔ PC Hub via **QR scan** (or code) | **Scan QR** camera, manual Hub URL/code, Tailscale guide | Cold start unpaired; Account → Re-pair; deep link `cursor-companion://pair` | **Implemented (manual/deeplink) — camera + PC QR display planned** |
+| Pair | `Pair` | Trust phone ↔ PC Hub via **PC /pair QR** + phone **Scan QR** (or code) | Steps card, **Scan QR**, ScrollView form, manual Hub URL/code, Tailscale guide | Cold start unpaired; Account → Re-pair; deep link `cursor-companion://pair` | **Implemented (manual/deeplink/camera + PC /pair) — G: scroll + steps card + console/hero polish** |
 | Health | `Health` | Prove Hub/Cursor path before chatting | Health rows, Refresh, Continue to Chats, Re-pair | After successful pair; Account → Health | **Implemented** |
 | Main tabs | `Main` | Shell: Chats \| Account | Custom bottom tab bar | Health Continue; deep link `main` / `nav/home` | **Implemented** |
 | **Home (Chats)** | (Main → Chats) | Cursor-sidebar-inspired projects → sessions | New Chat, Search, Projects, Repositories tree, profile footer | Default Main tab | **Implemented (shell) — IA amend pending rebuild** |
@@ -975,23 +1051,24 @@ flowchart LR
 
 ## Key User Scenarios
 
-### 1. Pair (QR primary)
+### 1. Pair (QR primary — Amendment G)
 
 ```mermaid
 sequenceDiagram
   participant Op as Operator
-  participant PC as Hub on PC
+  participant Hub as Hub on PC
+  participant Browser as PC browser /pair
   participant Phone as APK Pair
-  Op->>PC: POST /pair/start on 127.0.0.1
-  PC-->>Op: qrPayload + code
-  PC->>Op: Display QR on PC
-  Op->>Phone: Scan QR with camera
-  Phone->>PC: pair/complete over Tailscale
-  PC-->>Phone: deviceToken
+  Op->>Hub: Start Hub (console shows /pair URL)
+  Op->>Browser: Open http://127.0.0.1:8787/pair
+  Browser-->>Op: QR on PC screen
+  Op->>Phone: Steps card → Scan QR
+  Phone->>Hub: pair/complete over Tailscale
+  Hub-->>Phone: deviceToken
   Phone->>Phone: Navigate Health
 ```
 
-**Fallback:** type Hub Tailscale URL + code manually (no camera).
+**Fallback:** type Hub **Tailscale** URL + code manually (no camera). Never instruct typing `127.0.0.1` on the phone.
 ### 2. Health / connection
 
 ```mermaid
@@ -1072,7 +1149,7 @@ See **Screen — Opened chat** interaction model. Phone is remote UI; Hub + Live
 
 | Screen | Empty | Loading | Error | Offline (Tailscale / Hub) |
 |--------|-------|---------|-------|---------------------------|
-| Pair | Form ready; **Scan QR** idle; Tailscale guide if needed | Camera permission / decode spinner; disable Pair + spinner | Inline pair-error; expired QR; camera denied → Enter code | Same error + guide; stay on Pair |
+| Pair | ScrollView + steps card + **Scan QR** idle; Tailscale guide if needed | Camera permission / decode spinner; disable Pair + spinner | Inline pair-error; expired QR; camera denied → Enter code | Same error + guide; stay on Pair (scroll) |
 | Health | Rows with unknown until first refresh | Refresh spinner | Row-level fail + copy from connection-state | Offline copy; Continue may still open Chats |
 | **Home** | Unbound / No chats / No matches (Copywriting) | Initial ActivityIndicator; pull-to-refresh; optional skeleton tree | Banner with message; keep last tree if any | ConnectionChip Offline; tree stale; New Chat may still open (create queues) |
 | Live chat | Empty transcript + composer idle | Connecting / Working pill / streaming | Send fail toast; Model panel error; reconnect chip | Queued outbound; no auto-approve |
@@ -1088,15 +1165,15 @@ See **Screen — Opened chat** interaction model. Phone is remote UI; Hub + Live
 | Area | Implemented now | Planned / polish (post-plan) |
 |------|-----------------|------------------------------|
 | Navigation shell | Stack + Main Chats\|Account | Align spacing tokens to 4pt scale |
-| Pair / Health | Manual pair + deeplink + Health | **QR primary:** PC shows QR; phone **Scan QR** camera; polish copy |
-| **Home** | Flat Gemini list + FAB + project headers | **Rebuild to sidebar IA:** New Chat row, Search, Projects, Repositories tree, timestamps, selected highlight, profile footer; remove FAB |
+| Pair / Health | Manual pair + deeplink + camera scanner + Health; Hub `GET /pair` page | **G P0:** Pair ScrollView + steps card; Hub console `/pair` URL; PC hero “open on PC”; Account How it works language |
+| **Home** | Flat Gemini list + FAB + project headers | **Rebuild to sidebar IA:** New Chat row, Search, Projects, Repositories tree, timestamps, selected highlight, profile footer; remove FAB; FlatList |
 | Live chat | Messages, approvals, basic ComposerBar + attach | **Cursor chrome:** gray bubbles, agent identity, path pills, circular `+` sheet, mode chips, Working/Queued, Model panel, Send→Stop; mid-chat mode CDP; mic/camera |
 | Composer `+` modes | Create `agentMode` ask/debug/multitask/parallel | Plan mode + live mid-chat switch; MCP read-only sheet |
 | Model panel | `GET /workspace/models` + create model; `model_select` VERIFIED scrape | Live mid-chat model apply polish; section/NEW/speed metadata when Hub provides |
 | New session | Model, mode, attach, create queue | Mic/camera attach; richer model empty UX |
 | History / open-on-pc | Screen + Hub path | Optional history-list row metal (non-P0) |
 | Editor | Browse/preview | Keep optional; not primary path |
-| Motion | Mostly none | Intentional micro-interactions (below) |
+| Motion | Mostly none | **G:** ≤2 micro-interactions/screen; reduce-motion; transform/opacity; no infinite loops |
 | Dark mode | Not shipped | Deferred alternate |
 | **Away-from-PC (F)** | — | Hub stream/approval/status/stop prerequisites; local notifications; row status + badge; approval v2; Changes/Diff; app lock; drafts; PC reachability |
 
@@ -1123,24 +1200,35 @@ See **Screen — Opened chat** interaction model. Phone is remote UI; Hub + Live
 
 ---
 
-## Motion Notes (plan-level, RN-appropriate)
+## Motion Notes (plan-level, RN-appropriate) — Amendment G
 
-Principles adapted from motion craft — implement later with RN `Animated` or Reanimated; **respect `AccessibilityInfo.isReduceMotionEnabled`**.
+Stack: **Expo React Native** (`Animated` / Reanimated later) — **not SwiftUI**. Ignore OLED/dark design-system motion kits.
+
+### Hard caps (locked)
+
+| Rule | Contract |
+|------|----------|
+| Budget | **1–2 meaningful micro-interactions per screen max** (press feedback counts as one if it is the only motion) |
+| Properties | Prefer **`transform` + `opacity` only** — avoid layout thrash animations on lists |
+| Scale floor | Enter / press scale **never below ~0.95** (no bounce-from-0; no springy “AI” pops) |
+| Sheets | Enter: opacity + `translateY` (~8–16px) and optional scale ≥0.95; exit mirrors or instant |
+| Press | Opacity 0.7–0.85 for **80–150ms** on primary buttons / rows (Android ripple OK when native) |
+| Reduce Motion | Query `AccessibilityInfo.isReduceMotionEnabled` (and honor OS prefers-reduced-motion). Fallback: **opacity-only** or **instant** — no translate/scale |
+| Lists | **FlatList** (or equivalent virtualization) for long Home session trees — do not animate every row mount |
+| Forbidden | Decorative **infinite loops**, continuous glow/pulse chrome, parallax wallpaper, Lottie ornament loops. Working-status mark may use a **static** accent when reduce-motion (see F3) |
+
+### Allowed moments (pick ≤2 per screen at implement time)
 
 | Moment | Intent | Suggested feel | Reduced motion |
 |--------|--------|----------------|----------------|
-| Pair success | Trust established | Short fade + navigate to Health (~200–300ms) | Instant navigate |
-| Repo expand/collapse | Hierarchy clarity | Height fade ~200ms | Instant toggle |
-| Selected session | Quiet focus | Background crossfade to `#eef0f3` ~150ms | Instant |
-| Approval card appear | Attention without panic | Slide/fade in from transcript bottom (~250ms) | Instant appear |
-| Plus sheet open | Mode/actions | Fade/slide up ~200ms | Instant |
-| Mode chip insert | Mode selected | Chip scale 0.96→1 ~150ms | Instant |
-| Working / Queued strip | Busy / follow-up | Fade in 150ms | Instant |
-| Model panel open | Pick model | Fade above composer ~200ms | Instant |
-| Message send | Optimistic send | Bubble pop scale 0.96→1 (~150ms) | Instant append |
-| Reconnect / Online chip | Quiet confidence | Chip color crossfade 200ms | Instant color swap |
+| Pair success | Trust established | Opacity fade ~200–300ms then navigate Health | Instant navigate |
+| Press / primary CTA | Tactile confirm | Opacity dip 80–150ms | Instant opacity or none |
+| Sheet / panel open (`+`, Model, PC picker) | Mode/actions | Opacity + translateY; scale floor 0.95; ~200ms | Opacity-only or instant |
+| Approval card appear | Attention without panic | Opacity + slight translateY (~250ms) | Instant appear |
+| Mode chip insert | Mode selected | Scale 0.96→1 ~150ms | Instant |
+| Selected session / Online chip | Quiet focus | Color/background crossfade ≤200ms | Instant |
+| Message send | Optimistic send | Scale 0.96→1 (~150ms) | Instant append |
 | New chat modal | Focus create | Native stack modal (OS default) | OS default |
-| Offline banner | Caution | Fade in; no shake | Instant |
 
 No decorative continuous glow. Motion conveys state, not ornament.
 
@@ -1188,6 +1276,9 @@ Open questions closed with product defaults (change only if you disagree before 
 | 15 | **(F)** Deny uses **3 s Undo snackbar**, not a confirm dialog |
 | 16 | **(F)** App lock: require unlock to approve **on** by default; lock on open **off** |
 | 17 | **(F)** Changes are **read-only** on phone until Keep/Undo selectors VERIFIED |
+| 18 | **(G)** Overflowing screens use **ScrollView / keyboard-aware** + safe-area — never `flex:1` + center-only multi-field forms (Pair P0) |
+| 19 | **(G)** Primary pair discoverability = PC browser **`http://127.0.0.1:8787/pair`**; Hub console prints it; PC hero + phone steps card + Account How it works share language; manual URL+code fallback |
+| 20 | **(G)** Calm RN motion: ≤2 micro-interactions/screen; Reduce Motion → opacity/instant; transform/opacity; scale ≥0.95; FlatList for long lists; no decorative infinite loops |
 
 ---
 
@@ -1195,7 +1286,7 @@ Open questions closed with product defaults (change only if you disagree before 
 
 ```mermaid
 flowchart TB
-  Pair["1 Pair — Scan QR / code"] --> Health["2 Health"]
+  Pair["1 Pair — PC /pair → Scan QR"] --> Health["2 Health"]
   Health --> Main["3 Main tabs"]
   Main --> Home["4 Home — sidebar projects→sessions"]
   Main --> Settings["5 Settings — PC + Refresh now"]
@@ -1208,7 +1299,7 @@ flowchart TB
 
 | # | Screen | User gets | Build priority |
 |---|--------|-----------|----------------|
-| 1 | **Pair** | PC QR + phone **Scan QR**; manual fallback | P0 |
+| 1 | **Pair** | PC `127.0.0.1:8787/pair` + steps card + **Scan QR**; ScrollView; manual fallback | P0 (G) |
 | 2 | **Health** | Prove Hub/Cursor path | P0 (polish) |
 | 3 | **Main** | Chats \| Account tabs | P0 |
 | 4 | **Home** | Cursor-sidebar tree; sync/parity hints | P0 rebuild |
@@ -1220,7 +1311,8 @@ flowchart TB
 
 **Sync (cross-cutting):** Home focus + pull + WS + Settings Refresh now → same PC session list.  
 **Away-from-PC (cross-cutting, F):** notifications + row status + badge + approval v2 + Changes/Diff + app lock; build order Hub wave 1 → screens.  
-**Non-goals:** cloud agents, phone CDP, Getting Started/Slack, full phone IDE, tools-on-phone.
+**Scroll / pair discoverability / motion (cross-cutting, G):** ScrollView on overflowing screens; PC `/pair` URL path; calm RN motion caps.  
+**Non-goals:** cloud agents, phone CDP, Getting Started/Slack, full phone IDE, tools-on-phone, dark OLED redesign.
 
 ---
 
@@ -1234,8 +1326,9 @@ Apply on every screen rebuild (ui-ux-pro-max + RN stack):
 | Safe area | Respect top/bottom insets; bottom tabs + composer never under gesture bar |
 | A11y | `accessibilityLabel` / role on every control (`Scan QR`, `Refresh now`, `Composer actions`, …) |
 | Feedback | Press opacity/ripple **80–150ms**; no instant silent taps |
-| Motion | Meaningful only (pair success, sheet open, approval appear); honor reduce-motion |
-| Lists | Virtualized FlatList; pull-to-refresh on Home only where needed |
+| Scroll (G) | Overflowing screens → ScrollView / keyboard-aware + safe-area; never center-only multi-field forms |
+| Motion (G) | ≤2 meaningful motions/screen; transform/opacity; scale ≥0.95; honor Reduce Motion |
+| Lists | Virtualized FlatList for long session lists; pull-to-refresh on Home where needed |
 | Icons | Vector/Lucide — **no emoji** as chrome |
 | Tokens | Spacing 4–64; light calm colors from `theme.ts`; no raw hex in screens |
 | Nav | Typed routes; predictable Back from Live → Home |
@@ -1257,7 +1350,7 @@ Apply on every screen rebuild (ui-ux-pro-max + RN stack):
 
 > Pre-seeded for researcher completeness. Orchestrator Step 9.5 probe may replace this section after checker approval.
 
-Applicable state considerations resolved: 18 covered, 2 backstop, 0 unresolved
+Applicable state considerations resolved: 21 covered, 2 backstop, 0 unresolved
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
@@ -1276,10 +1369,13 @@ Applicable state considerations resolved: 18 covered, 2 backstop, 0 unresolved
 | populated | Opened chat stream | ✅ covered | User bubbles + agent blocks + path pills at typical volume |
 | partial | New chat / Model list | ✅ covered | Empty models disables Create/Send model apply until refresh |
 | partial | Multi-root Projects | ✅ covered | List only Hub-bound roots; never invent folders |
-| overflow | Home tree / transcript | ✅ covered | Vertical scroll; timestamps stay trailing; path pills truncate |
+| overflow | Home tree / transcript | ✅ covered | Vertical scroll / FlatList; timestamps stay trailing; path pills truncate |
+| overflow | Pair form + keyboard (G) | ✅ covered | ScrollView / keyboard-aware + safe-area; steps card above fold; forbid center-only flex |
+| overflow | Account Settings cards (G) | ✅ covered | Single scroll column; many cards remain reachable |
 | zero-one-many | Home | ✅ covered | Empty vs one folder vs many; one vs many sessions |
 | zero-one-many | Queued strip | ✅ covered | Hide at 0; “1 Queued” at one; count label if many |
 | long-text | Session title / project path / queued preview | ✅ covered | Ellipsis; queued preview one line |
+| long-text | Pair steps / PC URL (G) | ✅ covered | Steps card wraps Body/Label; monospace URL may wrap — never shrink to 11px-only hint |
 | overflow | Bottom tab labels | 🧪 backstop | Visual check at large font scale — tabs remain 44px |
 | long-text | Approval tool summary | 🧪 backstop | Card truncates with expand or scroll — verify on Pixel |
 
@@ -1295,7 +1391,7 @@ Applicable state considerations resolved: 18 covered, 2 backstop, 0 unresolved
 - [ ] Dimension 6 Registry Safety: PASS
 - [ ] Dimension 7 Inventory Provenance: PASS (N/A shadcn — Tool: none; RN modules enumerated below)
 
-**Approval:** draft after home + opened-chat amendments + **Amendment F** (2026-10-01) — prior approval in `05-UI-REVIEW.md`; requires checker re-run
+**Approval:** plan_locked after amendments **A–G** (G = 2026-10-14 scroll / pair URL / RN motion) — prior approval in `05-UI-REVIEW.md`; requires checker re-run for G deltas
 
 **Enumerated UI modules (provenance for plan, not a shadcn inventory):**  
 `node` walk of `apps/mobile/src/{components,screens}` — **18 UI modules** — `@cursor-mobile/mobile@0.1.0` — 2026-10-01.  

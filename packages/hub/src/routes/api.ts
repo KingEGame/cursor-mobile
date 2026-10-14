@@ -1822,7 +1822,8 @@ export function createApiRouter(ctx: HubContext): Router {
                 result.code === "SEND_NOT_CONFIRMED" ||
                 result.code === "MENTION_NOT_APPLIED" ||
                 result.code === "IMAGE_NOT_ATTACHED" ||
-                result.code === "COMPOSER_NOT_EMPTY"
+                result.code === "COMPOSER_NOT_EMPTY" ||
+                result.code === "CURSOR_WINDOW_HIDDEN"
               ? 409
               : 503;
         throw new ApiError(status, result.code, result.error);

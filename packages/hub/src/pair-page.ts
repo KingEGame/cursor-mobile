@@ -38,18 +38,25 @@ export function createPairPageRouter(ctx: HubContext): Router {
 <style>
   :root { color-scheme: light; font-family: system-ui, sans-serif; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f5f7; color: #1a1c1e; }
-  main { background: #fff; border: 1px solid #e2e5ea; border-radius: 16px; padding: 32px; width: 360px; text-align: center; }
-  h1 { font-size: 20px; margin: 0 0 4px; } p { color: #5f6368; margin: 6px 0; line-height: 1.4; }
+  main { background: #fff; border: 1px solid #e2e5ea; border-radius: 16px; padding: 32px; width: min(400px, 92vw); text-align: center; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  .hero { background: #eef0f3; border-radius: 12px; padding: 12px 14px; margin: 0 0 16px; text-align: left; }
+  .hero strong { display: block; color: #1a1c1e; margin-bottom: 4px; }
+  p { color: #5f6368; margin: 6px 0; line-height: 1.45; font-size: 14px; }
   .qr svg { width: 280px; height: 280px; } .code { font: 600 28px ui-monospace, monospace; letter-spacing: 4px; margin: 8px 0; }
   .state { font-weight: 600; margin-top: 12px; } .ok { color: #1e6b4a; } .bad { color: #b3261e; }
   a { color: #1e6b4a; }
+  .url { font: 500 13px ui-monospace, monospace; word-break: break-all; }
 </style></head><body><main>
   <h1>Pair your phone</h1>
-  <p>On the phone: <b>Cursor Mobile → Scan QR</b>. Phone and PC must both be on Tailscale.</p>
+  <div class="hero" role="note">
+    <strong>You are on the PC — keep this page open here</strong>
+    <p style="margin:0">Do <b>not</b> type <span class="url">http://127.0.0.1:${escapeHtml(String(ctx.config.hubPort))}/pair</span> on the phone. On the phone open <b>Cursor Mobile → Scan QR</b> and aim at the code below. Both devices need Tailscale Online.</p>
+  </div>
   <div class="qr" aria-label="Pairing QR code">${svg}</div>
-  <p>Or type this code in the app</p>
+  <p>Or type this code on the phone (manual fallback)</p>
   <div class="code">${escapeHtml(pending.code)}</div>
-  <p>Hub address ${escapeHtml(host)} · expires in <span id="left"></span></p>
+  <p>Phone reaches Hub at ${escapeHtml(host)} · expires in <span id="left"></span></p>
   <div class="state" id="state">Waiting for the phone…</div>
   <p><a href="/pair">New code</a></p>
 </main>

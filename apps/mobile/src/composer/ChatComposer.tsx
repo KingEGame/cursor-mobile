@@ -210,32 +210,39 @@ export function ChatComposer(props: {
       <Modal visible={sheet === 'plus'} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
         <Pressable style={styles.backdrop} onPress={() => setSheet(null)}>
           <Pressable style={styles.sheet} onPress={() => undefined}>
-            <Text style={styles.sheetLabel}>Mode</Text>
-            <View style={styles.modes}>
-              {MODES.map((m) => (
-                <Pressable
-                  key={m.mode}
-                  style={[styles.modeCard, { backgroundColor: m.color }, mode === m.mode && styles.modeSelected]}
-                  onPress={() => {
-                    setMode(mode === m.mode ? null : m.mode);
-                    setSheet(null);
-                  }}
-                >
-                  <Text style={styles.modeName}>{m.mode}</Text>
-                  <Text style={styles.modeSub} numberOfLines={2}>
-                    {m.subtitle}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-            <SheetRow icon={FileText} label="Files" sub="From this project on the PC" disabled={!composerId}
-              onPress={() => { setSheet(null); setPicker('files'); }} />
-            <SheetRow icon={Slash} label="Skills & rules" sub="Cursor “/” commands" disabled={!composerId}
-              onPress={() => { setSheet(null); setPicker('skills'); }} />
-            <SheetRow icon={Plug} label="Plugins (MCP)" sub="Cursor “@” MCP servers" disabled={!composerId}
-              onPress={() => { setSheet(null); setPicker('plugins'); }} />
-            <SheetRow icon={Camera} label="Take photo" sub="Attach a camera picture" onPress={() => void addPhoto('camera')} />
-            <SheetRow icon={ImageIcon} label="Choose photo" sub="From the phone gallery" onPress={() => void addPhoto('library')} />
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetScrollContent}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
+              <Text style={styles.sheetLabel}>Mode</Text>
+              <View style={styles.modes}>
+                {MODES.map((m) => (
+                  <Pressable
+                    key={m.mode}
+                    style={[styles.modeCard, { backgroundColor: m.color }, mode === m.mode && styles.modeSelected]}
+                    onPress={() => {
+                      setMode(mode === m.mode ? null : m.mode);
+                      setSheet(null);
+                    }}
+                  >
+                    <Text style={styles.modeName}>{m.mode}</Text>
+                    <Text style={styles.modeSub} numberOfLines={2}>
+                      {m.subtitle}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <SheetRow icon={FileText} label="Files" sub="From this project on the PC" disabled={!composerId}
+                onPress={() => { setSheet(null); setPicker('files'); }} />
+              <SheetRow icon={Slash} label="Skills & rules" sub="Cursor “/” commands" disabled={!composerId}
+                onPress={() => { setSheet(null); setPicker('skills'); }} />
+              <SheetRow icon={Plug} label="Plugins (MCP)" sub="Cursor “@” MCP servers" disabled={!composerId}
+                onPress={() => { setSheet(null); setPicker('plugins'); }} />
+              <SheetRow icon={Camera} label="Take photo" sub="Attach a camera picture" onPress={() => void addPhoto('camera')} />
+              <SheetRow icon={ImageIcon} label="Choose photo" sub="From the phone gallery" onPress={() => void addPhoto('library')} />
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -387,8 +394,10 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radii.lg,
     padding: spacing.md,
     paddingBottom: spacing.xl,
-    gap: spacing.xs,
+    maxHeight: '85%',
   },
+  sheetScroll: { maxHeight: 480 },
+  sheetScrollContent: { gap: spacing.xs, paddingBottom: spacing.sm },
   sheetLabel: { color: colors.muted, fontSize: 12, fontWeight: '600', marginTop: spacing.xs },
   modes: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm },
   modeCard: { width: '48%', borderRadius: radii.sm, padding: spacing.sm, minHeight: 64 },

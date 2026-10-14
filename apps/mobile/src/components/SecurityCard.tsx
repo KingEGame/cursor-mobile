@@ -25,12 +25,7 @@ export function SecurityCard() {
   return (
     <View style={styles.card} testID="account-security">
       <Text style={styles.label}>Security</Text>
-      <Row
-        title="Unlock to send"
-        meta="Fingerprint or PIN before a message goes to the PC"
-        value={settings.lockSend}
-        onChange={(v) => void change('lockSend', v)}
-      />
+      {/* Unlock-to-send paused — fingerprint on every send was too noisy. */}
       <Row
         title="Lock app on open"
         meta="Ask again after 5 minutes in the background"
