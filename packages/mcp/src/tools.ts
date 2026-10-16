@@ -13,6 +13,8 @@ import {
   chatChanges,
   chatFileDiff,
   composerId,
+  decideApproval,
+  listApprovals,
   findChat,
   findMentions,
   listAgents,
@@ -272,6 +274,7 @@ export function registerCursorTools(server: McpServer, hub: HubClient): void {
     },
     guard(async ({ composerId: id }: { composerId: string }) => {
       await stopChat(hub, id);
+      lastSent.delete(composerId(id));
       return { stopped: true };
     }),
   );
@@ -314,13 +317,13 @@ export function registerCursorTools(server: McpServer, hub: HubClient): void {
     {
       title: "Find files, skills or rules to attach",
       description:
-        "Ask Cursor on the PC what it offers after '@' (files in the chat's project, MCP plugins) or '/' (skills, commands, rules). Pass the exact label back in cursor_send / cursor_new_chat mentions. Briefly types into the PC composer and clears it.",
+        "Ask Cursor on the PC what it offers after '@' (files in the chat's project, MCP plugins) or '/' (skills, commands, rules). Pass the exact label back in cursor_send / cursor_new_chat mentions. Briefly types into the PC composer and clears it, so it is not read-only.",
       inputSchema: {
         composerId: chatIdArg.describe("Any chat in the target project (files are project-scoped)"),
         trigger: z.enum(["@", "/"]),
         query: z.string().max(80).optional().describe("Filter text, e.g. part of a file name"),
       },
-      annotations: READ,
+      annotations: ACT,
     },
     guard(async ({ composerId: id, trigger, query }: { composerId: string; trigger: "@" | "/"; query?: string }) => {
       const trig = trigger === "/" ? "/" : "@";
@@ -332,4 +335,30 @@ export function registerCursorTools(server: McpServer, hub: HubClient): void {
       }));
     }),
   );
+
+  server.registerTool(
+    "cursor_list_approvals",
+    {
+      title: "Pending tool approvals",
+      description: "Tool calls a live Hub session is waiting on you to approve or deny. Takes the Hub session id (not a history composerId).",
+      inputSchema: { sessionId: z.string().min(1).describe("Hub live session id") },
+      annotations: READ,
+    },
+    guard(async ({ sessionId: id }: { sessionId: string }) => (await listApprovals(hub, id)).items),
+  );
+
+  for (const decision of ["approve", "deny"] as const) {
+    server.registerTool(
+      `cursor_${decision}`,
+      {
+        title: decision === "approve" ? "Approve a pending tool call" : "Deny a pending tool call",
+        description:
+          `${decision === "approve" ? "Approve" : "Deny"} one pending tool call on the PC (clicks it in Cursor). ` +
+          "Get approvalId from cursor_list_approvals and review the tool and args first; approving lets the agent run that tool on the PC.",
+        inputSchema: { sessionId: z.string().min(1), approvalId: z.string().min(1) },
+        annotations: { readOnlyHint: false, destructiveHint: decision === "approve", openWorldHint: false },
+      },
+      guard(async (a: { sessionId: string; approvalId: string }) => decideApproval(hub, a.sessionId, a.approvalId.trim(), decision)),
+    );
+  }
 }

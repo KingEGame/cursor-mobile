@@ -5,6 +5,7 @@
 
 import type { HubClient } from "./hub-client.js";
 import { HubError } from "./hub-client.js";
+import { randomUUID } from "node:crypto";
 
 export type ChatStatus = "idle" | "working" | "waiting_approval" | "error";
 /** Cursor composer modes the Hub can switch to (omit to keep the chat's current mode). */
@@ -157,6 +158,35 @@ export function newChat(hub: HubClient, projectId: string, text: string, options
 
 export function stopChat(hub: HubClient, id: string) {
   return hub.call<{ ok: true }>("POST", `/v1/agents/chats/${composerId(id)}/stop`);
+}
+
+export interface PendingApproval {
+  approvalId: string;
+  tool: string;
+  summary: string;
+  argsPreview?: unknown;
+  status: string;
+  expiresAt: string | null;
+}
+
+/** Approvals belong to Hub live sessions (not history chats), so they take the Hub session id. */
+export function sessionId(raw: string): string {
+  const id = raw.trim();
+  if (!/^[\w.:-]{1,128}$/.test(id)) throw new HubError(400, "VALIDATION_ERROR", `Not a Hub session id: ${raw}`);
+  return id;
+}
+
+export function listApprovals(hub: HubClient, session: string) {
+  return hub.call<{ sessionId: string; items: PendingApproval[] }>("GET", `/v1/sessions/${encodeURIComponent(sessionId(session))}/approvals`);
+}
+
+export function decideApproval(hub: HubClient, session: string, approvalId: string, decision: "approve" | "deny") {
+  return hub.call<{ approvalId: string; decision: string; status: string; domApplied: boolean; synthetic: boolean; note?: string }>(
+    "POST",
+    `/v1/sessions/${encodeURIComponent(sessionId(session))}/approvals`,
+    { approvalId, decision },
+    { "idempotency-key": randomUUID() },
+  );
 }
 
 export function chatChanges(hub: HubClient, id: string) {

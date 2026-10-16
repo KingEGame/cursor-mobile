@@ -77,13 +77,21 @@ export interface HubClientOptions {
   tokens: TokenStore;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** Extra attempts for read-only calls that hit a transient failure (default 2). */
+  readRetries?: number;
+  retryDelayMs?: number;
 }
+
+const TRANSIENT_STATUS = new Set([502, 503, 504]);
+const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export class HubClient {
   readonly baseUrl: string;
   private readonly tokens: TokenStore;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly readRetries: number;
+  private readonly retryDelayMs: number;
   /** One pairing at a time: parallel tool calls share it instead of creating extra devices. */
   private pairing: Promise<string> | null = null;
 
@@ -93,17 +101,36 @@ export class HubClient {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     // Sends wait for Cursor to confirm (menus, model switch) — allow a long round trip.
     this.timeoutMs = opts.timeoutMs ?? 90_000;
+    this.readRetries = opts.readRetries ?? 2;
+    this.retryDelayMs = opts.retryDelayMs ?? 400;
   }
 
-  /** Authenticated JSON call; re-pairs once if the Hub forgot or revoked the token. */
-  async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  /**
+   * Authenticated JSON call; re-pairs once if the Hub forgot or revoked the token.
+   * GETs retry on transient failures (Hub restarting, 502-504); writes never retry,
+   * because a timed-out send may already have run on the PC.
+   */
+  async call<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    const retries = method === "GET" ? this.readRetries : 0;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.callOnce<T>(method, path, body, headers);
+      } catch (err) {
+        const transient = err instanceof HubError && (err.code === "HUB_UNREACHABLE" || TRANSIENT_STATUS.has(err.status));
+        if (!transient || attempt >= retries) throw err;
+        await sleepMs(this.retryDelayMs * 2 ** attempt);
+      }
+    }
+  }
+
+  private async callOnce<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
     let token = this.tokens.load() ?? (await this.pair());
-    let res = await this.raw(method, path, body, token);
+    let res = await this.raw(method, path, body, token, headers);
     if (res.status === 401) {
       // Another call may already have re-paired; only pair again if the token is unchanged.
       const current = this.tokens.load();
       token = current && current !== token ? current : await this.pair();
-      res = await this.raw(method, path, body, token);
+      res = await this.raw(method, path, body, token, headers);
     }
     return this.parse<T>(res);
   }
@@ -137,8 +164,8 @@ export class HubClient {
     return done.deviceToken;
   }
 
-  private async raw(method: string, path: string, body?: unknown, token?: string): Promise<Response> {
-    const headers: Record<string, string> = { accept: "application/json" };
+  private async raw(method: string, path: string, body?: unknown, token?: string, extra?: Record<string, string>): Promise<Response> {
+    const headers: Record<string, string> = { accept: "application/json", ...extra };
     if (body !== undefined) headers["content-type"] = "application/json";
     if (token) headers.authorization = `Bearer ${token}`;
     try {

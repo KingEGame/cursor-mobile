@@ -110,13 +110,42 @@ async function call(name: string, args: Record<string, unknown> = {}) {
   return { isError: !!res.isError, text, json: json as any };
 }
 
+describe("HubClient retries", () => {
+  const mk = (responses: Array<Response | Error>, method = "GET") => {
+    let n = 0;
+    const fetchImpl = (async () => {
+      const r = responses[Math.min(n++, responses.length - 1)]!;
+      if (r instanceof Error) throw r;
+      return r;
+    }) as unknown as typeof fetch;
+    const hub = new HubClient({ baseUrl: "http://127.0.0.1:1", tokens: memoryTokenStore("t"), fetchImpl, retryDelayMs: 1 });
+    return { hub, calls: () => n, method };
+  };
+  const okRes = () => new Response(JSON.stringify({ v: 1 }), { status: 200 });
+
+  it("retries a GET after a transient failure", async () => {
+    const { hub, calls } = mk([new Error("ECONNREFUSED"), new Response("", { status: 503 }), okRes()]);
+    expect(await hub.call("GET", "/v1/x")).toEqual({ v: 1 });
+    expect(calls()).toBe(3);
+  });
+
+  it("never retries a POST (a send may already have run)", async () => {
+    const { hub, calls } = mk([new Error("timeout"), okRes()]);
+    await expect(hub.call("POST", "/v1/x", {})).rejects.toMatchObject({ code: "HUB_UNREACHABLE" });
+    expect(calls()).toBe(1);
+  });
+});
+
 describe("cursor-mobile MCP", () => {
   it("exposes the agreed tools (no message editing)", async () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "cursor_approve",
       "cursor_changes",
+      "cursor_deny",
       "cursor_diff",
       "cursor_find_mention",
+      "cursor_list_approvals",
       "cursor_list_projects",
       "cursor_new_chat",
       "cursor_read_chat",
@@ -125,6 +154,21 @@ describe("cursor-mobile MCP", () => {
       "cursor_stop",
       "cursor_wait",
     ]);
+  });
+
+  it("rejects malformed chat and session ids before reaching the Hub", async () => {
+    for (const tool of ["cursor_stop", "cursor_changes"]) {
+      const res = await call(tool, { composerId: "not-a-uuid" });
+      expect(res.isError).toBe(true);
+    }
+    expect((await call("cursor_diff", { composerId: "../x", index: 0 })).isError).toBe(true);
+    expect((await call("cursor_list_approvals", { sessionId: "a/b" })).isError).toBe(true);
+    expect((await call("cursor_approve", { sessionId: "a b", approvalId: "x" })).isError).toBe(true);
+  });
+
+  it("marks cursor_find_mention as not read-only (it types into the composer)", async () => {
+    const t = (await client.listTools()).tools.find((x) => x.name === "cursor_find_mention");
+    expect(t?.annotations?.readOnlyHint).toBe(false);
   });
 
   it("pairs itself over loopback as a revocable device", async () => {
