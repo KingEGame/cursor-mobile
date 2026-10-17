@@ -1,283 +1,160 @@
 # Phase 5 — UI Review
 
-**Audited:** 2026-10-14  
-**Baseline:** `05-UI-SPEC.md` (amendments A–G) + implemented Expo RN + Hub pair page  
-**Phase status:** UI-SPEC **approved** (checker); G P0 metal remediated same day (see below)  
-**Screenshots:** Hub `/pair` re-captured after Hub restart — hero “You are on the PC — keep this page open here”. Mobile APK not re-sideloaded this turn.  
-**Prior review:** Fresh **gsd-ui-auditor** 6-pillar pass; scores below are **pre-remediation**.
+**Audited:** 2026-10-16
+**Baseline:** `05-UI-SPEC.md` (amendments A–G) + uncommitted 2026-10-16/17 chat-UX work in `apps/mobile/src`
+**Screenshots:** not captured (Expo RN app; no dev server or device; nothing tested on a device). Code-only audit.
+**Prior audit:** 2026-10-14, 11/24 (`05-UI-REVIEW.2026-10-14.md`).
 
-**Product locks still true:** PC-local Hub · Tailscale+pair · CDP `127.0.0.1` · phone remote UI · light calm grayscale (not OLED).
-
-### Remediation (2026-10-14, post-audit)
-
-| Blocker | Fix |
-|---------|-----|
-| PairScreen no scroll | `ScrollView` + safe-area + steps card; drop center-only flex |
-| PC `/pair` undiscoverable | Hub CLI `PAIR PHONE → http://127.0.0.1:8787/pair`; PC hero; phone steps; Account How it works |
-| Zero motion / unpair | `CalmEnter` (Reduce Motion aware); Clear pairing `Alert` confirm; `+` sheet `ScrollView` |
-
-Remaining non-P0 from audit: typography scale drift, bubble color vs SPEC, Filter a11y, broader motion table.
+Product locks still true: PC-local Hub, Tailscale+pair, CDP 127.0.0.1, phone is remote UI only, light calm grayscale.
 
 ---
 
-## Pillar Scores (pre-remediation audit)
+## Pillar Scores
 
 | Pillar | Score | Key Finding |
 |--------|-------|-------------|
-| 1. Copywriting | 2/4 | Pair URL / “how to open QR” buried; Clear pairing has no confirm; CTA labels drift from contract |
-| 2. Visuals | 2/4 | Scan QR is a solid focal point, but 11px hint + centered clip kills hierarchy on small phones |
-| 3. Color | 3/4 | Light calm tokens mostly match; user bubble is green-tinted `#e6f2ec` vs SPEC `#f0f1f3` |
-| 4. Typography | 2/4 | 11 distinct sizes + weight 700/500; SPEC locks 4 sizes / 400+600 only |
-| 5. Spacing | 1/4 | **BLOCKER:** PairScreen has no ScrollView (`flex:1` + `justifyContent:'center'`) — clips under keyboard |
-| 6. Experience Design | 1/4 | **BLOCKER:** zero Animated/Reanimated; Hub CLI never prints `/pair` URL; destructive unpair is one tap |
+| 1. Copywriting | 3/4 | Failure-reason catalog (`send-errors.ts`) is excellent and recovery-oriented; Approve/Deny visible labels and Home empty-state CTA still drift from the contract |
+| 2. Visuals | 3/4 | Clear hierarchy in chat (delivery state, jump-to-latest, working bar, day dividers); focal-point and icon a11y mostly good; mode cards in the `+` sheet lack explicit a11y roles |
+| 3. Color | 2/4 | 29 hardcoded hex values outside `theme.ts`; `theme.bubbleUser` is still `#e6f2ec` while HistoryRead hardcodes `#f0f1f3`; stale dark-green fills `#1a2e24` in a light theme; no dark mode |
+| 4. Typography | 2/4 | 10 distinct font sizes (11–24) and weights 500/600/700 against a contract of 13/16/20/28 and 400/600 only |
+| 5. Spacing | 2/4 | 48dp touch targets are now consistent; `theme.spacing` xs=6 / sm=10 still off the 4pt scale and 2xl/3xl are missing; raw `gap: 2/6` literals |
+| 6. Experience Design | 3/4 | Strong state coverage (sending/sent/failed+Retry, stop confirm, live regions, keyboard fix, reduced-motion hook); gaps are polling-only freshness, Deny undo missing, motion barely used |
 
-**Overall (pre-fix): 11/24**
-
----
-
-## Top 3 Priority Fixes (addressed)
-
-1. **PairScreen missing ScrollView** — ~~clips~~ → ScrollView + steps card shipped.
-2. **Pairing URL undiscoverable** — ~~buried~~ → Hub console + PC hero + phone steps + Account copy.
-3. **Zero motion** — ~~none~~ → `CalmEnter` + Reduce Motion; fuller Motion Notes table still open.
+**Overall: 15/24** (was 11/24 on 2026-10-14)
 
 ---
 
-## Severity-ranked defect tracks (user-reported)
+## Top 3 Priority Fixes
 
-### A. SCROLL / overflow — BLOCKER
+1. **Typography and color tokens are bypassed** (WARNING) — operators see inconsistent sizes and a different user-bubble tint between Live chat and History chat. Add `type` and `colors` tokens (13/16/20/28, 400/600; `bubbleUser` `#f0f1f3`, `errorBg`, `warnBg`, `onAccent`) to `theme.ts` and replace the 29 literal hex values and 10 ad hoc sizes. Fix `#1a2e24` selected fills in `EditorScreen.tsx:294` and `FilePickerSheet.tsx:386,412` (dark-green rows with presumably light text in a light theme — verify contrast).
+2. **Approval card diverges from the contract** (WARNING) — `ApprovalCard.tsx` shows **Approve** / **Deny** instead of **Approve tool** / **Deny tool**; Deny has no **Tool denied · Undo** snackbar (SPEC F4), and a single tap on an irreversible approval is the highest-stakes control in the app. Align labels, add the 3 s undo, keep 48dp targets.
+3. **Freshness is poll-only and motion is minimal** (WARNING) — `HistoryReadScreen` re-reads every 4 s and the elapsed counter re-renders the whole screen every second (`setTick`, line 141), so replies and working state lag and the long transcript `ScrollView` re-renders. Subscribe to the Hub WS (as Home does), memoize message rows, and move the transcript to `FlatList` (as LiveChat already does). Use `useReducedMotion` for one or two meaningful transitions (new message, working bar) instead of only gating `scrollToEnd`.
 
-| Surface | Evidence | Verdict |
-|---------|----------|---------|
-| **PairScreen** | `KeyboardAvoidingView` → `View style={styles.content}` with `flex:1`, `justifyContent:'center'`, **no** `ScrollView` (`PairScreen.tsx` ~266–270, styles ~419–424) | **BLOCKER** — confirmed clip risk with Tailscale guide + 4 inputs + keyboard |
-| AccountScreen | `ScrollView` + RefreshControl | Pass |
-| HealthScreen | `ScrollView` | Pass |
-| ChatsHomeScreen | `FlatList` | Pass |
-| LiveChat / History | `FlatList` / `ScrollView` | Pass |
-| NewSession / Update / Editor / ChatChanges | Scroll/list present | Pass |
-| HomeScreen | Shim → Main (`return null`) | N/A |
-| **ChatComposer `+` sheet** | `Modal` content is a plain `Pressable`/`View` — **no** `ScrollView` (`ChatComposer.tsx` ~210–240); modes grid + 5 rows | **WARNING** — overflows short viewports |
-| Model sheet | `ScrollView` `maxHeight:420` | Pass |
-| FilePickerSheet | ScrollView/FlatList | Pass |
-| QrScanner | Full-screen Modal (camera) | Pass (not a form) |
+Also fix: Home empty state needs a **New Chat** CTA; add dark-mode tokens (known gap, Deferred in SPEC F9).
 
-### B. PAIRING URL DISCOVERABILITY — BLOCKER (operator path)
+---
 
-| Surface | What exists | Gap |
-|---------|-------------|-----|
-| Hub `GET /pair` | Live at `http://127.0.0.1:8787/pair`; QR + code + Tailscale host; light calm chrome | Page assumes you already found it. Copy says “On the phone…” but never “You opened this on the PC that runs Hub.” Narrow viewport shows card scrollbars / meta clip. |
-| Hub CLI (`cli.ts`) | Logs listen host, CDP, workspace, dataDir, API routes | **Never** prints `http://127.0.0.1:{port}/pair`. Routes line lists `POST /v1/pair/*` only — not the operator QR page. |
-| PairScreen body | “Hub must be running on the PC…” | Does not say *open the pair page in a PC browser*. |
-| PairScreen hint | `fontSize: 11` — “On the PC open http://127.0.0.1:8787/pair …” | Correct URL, **wrong hierarchy** (smallest type on screen). |
-| Account “How it works” | Mentions `127.0.0.1:8787/pair` + Scan QR | Better than Pair body, but still secondary meta; CTA is **Pair a PC** not SPEC **Pair with Hub**. |
-| UI-SPEC Account copy | “On the PC, show the Hub pairing QR…” | Implemented drift + no numbered PC→phone steps. |
+## Remediation log (2026-10-17, after this audit; code-only, not device-tested)
 
-### C. ANIMATION / OPTIMIZATION — WARNING → contract miss
-
-| Check | Result |
-|-------|--------|
-| `Animated` / Reanimated imports in `apps/mobile` | **0 files** |
-| package.json motion deps | **none** |
-| `AccessibilityInfo.isReduceMotionEnabled` / Haptics | **none** |
-| UI-SPEC Motion Notes (pair success, sheet, chip, approval, Working strip…) | Unimplemented — OS modal slide only |
-| FlatList virtualization knobs (`getItemLayout`, `windowSize`, `initialNumToRender`, `removeClippedSubviews`) | Mostly absent (keyExtractor present) |
-| ChatsHome 15s poll + WS + focus refresh | Correct for parity; jank risk if list grows without virtualization tuning / without memoized rows |
+| Finding | Status |
+|---------|--------|
+| Color: 29 hardcoded hex, bubbleUser mismatch, `#1a2e24` fills | Fixed: tokens in `theme.ts`, no hex literals left in `src/**/*.tsx`; warn darkened to `#8f6000` (5.0:1 on warnSoft) |
+| Typography: 10 sizes, weights 500/700 | Fixed: 13/16/20/28 via `type`, weights `weight.regular/semibold`, `lineHeight` tokens |
+| Spacing: xs=6/sm=10, no 2xl/3xl, raw literals | Fixed: 4/8/12/16/24/32/48/64 scale, small literals migrated |
+| Approve/Deny labels, Deny undo | Fixed: "Approve tool"/"Deny tool", 3 s "Tool denied · Undo" (flushes if you leave) |
+| Stop confirm vs SPEC | Removed: one tap |
+| Poll-only + full re-render | Partly: memoized FlatList rows, own-clock working bar, stable message identity, slower idle poll, paused in background. Hub WS not used: the Hub has no event for Agents-chat transcripts |
+| Empty-state CTAs | Fixed: Home "New Chat", chat "Open on PC" (new Hub route `POST /v1/agents/chats/:id/open`) |
+| Waiting-approval dead end | Fixed: "Open on PC" button when approvals can't be listed |
+| Stacked strips | Fixed: at most two status strips above the composer by priority |
+| Competing tinted strips | Fixed: working bar neutral surface |
+| Motion | Partly: CalmEnter on working bar, waiting box, outgoing bubbles, jump pill (reduced-motion aware) |
+| Jargon in failure copy | Fixed: no commands or "CDP" in phone-facing catalog text |
+| `+` sheet mode cards a11y | Fixed |
+| **Dark mode** | **Open** (needs theme-wide `useColorScheme` pass) |
+| Agent-identity blue, path pills (SPEC B) | Fixed: bold `#2563eb` "Cursor agent · time" heads each agent turn (4.7:1 on canvas); file/folder code spans render as monospace path pills, middle-truncated |
+| Approve one tap, no unlock | Fixed per SPEC F6: "Require unlock to approve tools" (Account → Security), on by default, prompts only when the phone has fingerprint/PIN; Deny never asks; sending still needs no unlock |
 
 ---
 
 ## Detailed Findings
 
-### Pillar 1: Copywriting (2/4)
+### Pillar 1: Copywriting (3/4)
 
-**WARNING — Pair primary/fallback CTAs drift from contract**
+Strengths
+- `hub/send-errors.ts` maps about 30 Hub and client codes to one-line, recovery-oriented messages, each flagged `queueable` / `definitelyNotSent`. The "may arrive twice" case is surfaced (`HistoryReadScreen.tsx:458-460`, "Send again" vs "Retry"). This exceeds the contract.
+- Pair/Account copy now carries the numbered PC to phone path (`AccountScreen.tsx:203` "Pair with Hub → Scan QR. Do not type that loopback URL"); Clear pairing uses `Alert.alert` (`AccountScreen.tsx:157`). Both 2026-10-14 blockers are fixed.
+- Loading, empty and error strings are specific ("Loading this chat from your PC…", "Nothing here yet", "No agents running", "No matching chats").
 
-- SPEC: primary **Scan QR**, fallback **Pair with Hub**.
-- Code: Scan QR ✓; submit button label **Pair** (`PairScreen.tsx` ~386); Account CTA **Pair a PC** (`AccountScreen.tsx` ~189).
+Gaps
+- WARNING: `ApprovalCard.tsx:63,78` visible labels are "Deny" / "Approve" (a11y labels are right). SPEC: "Approve tool" / "Deny tool".
+- WARNING: History empty state ("Nothing here yet") and Home empty state lack the contract CTAs (**Open on PC** / **New Chat**); contract titles ("No messages in this chat", "No chats yet") only partly match (`ChatsHomeScreen.tsx:324`).
+- WARNING: Stop uses a confirmation `Alert` ("Stop the agent?", `HistoryReadScreen.tsx:257`). SPEC F states "none — Stop is one tap" and "Stopped from phone" in the transcript. Defensible, but it contradicts the locked copy; either update the SPEC or remove the dialog.
+- WARNING: Failure strings carry PC jargon ("CDP", "npm run start:cursor:cdp", `send-errors.ts` CDP_UNAVAILABLE). Fine for this operator, but a command line in a phone toast is rough.
+- WARNING: Several error `Alert`/banner phrasings mix "Not sent —" and "Could not…" styles.
 
-**WARNING — Destructive Clear pairing skips confirm**
+### Pillar 2: Visuals (3/4)
 
-- SPEC: “Clear pairing: Remove this phone’s trust…?”
-- Code: `unpair` → `clearDevice()` immediately (`AccountScreen.tsx` ~155–157, ~255). No `Alert.alert`.
+- Chat focal flow is clear: day dividers (`HistoryReadScreen.tsx:369`), flush assistant text vs gray user bubble, tool lines muted, delivery label under pending bubble, `failedBubble` danger border + filled Retry pill, jump-to-latest pill with unseen count ("3 new ↓"), working bar with elapsed and last tool step.
+- Icon-only controls are labeled: composer `+` "Composer actions", model pill "Select model", Stop "Stop the agent", Home search/New Chat/Account, working chip announces count and filter action.
+- WARNING: the error bar, waiting box and cursor alert all stack above the composer (`HistoryReadScreen.tsx:497-568`); with error + waiting + working + changes simultaneously, the stream loses vertical space on small phones. No cap or collapse.
+- WARNING: `+` sheet mode cards (`ChatComposer.tsx:228`) have no `accessibilityRole`/label beyond child text; selection state is visual only.
+- WARNING: waiting box uses `#fff4e0` and working bar `accentSoft` green wash; two different tinted full-width strips compete with the accent for attention.
+- Agent identity blue (`#2563eb`), path pills and mode-chip tint colors from SPEC B were not found in this pass; Live chat remains a simplified take on the Cursor chrome.
 
-**WARNING — Approve / Deny visible labels shortened**
+### Pillar 3: Color (2/4)
 
-- a11y: “Approve tool” / “Deny tool” ✓  
-- Visible: **Approve** / **Deny** (`ApprovalCard.tsx` ~63, ~78) — fails Copywriting Contract table.
-
-**WARNING — Empty Home body vs SPEC**
-
-- SPEC: “Start a new chat to continue in the project open on your PC.”
-- Code: “Open Cursor on the PC and start a chat in the Agents window.” (`ChatsHomeScreen.tsx` ~305) — honest but not contract-aligned; misses New Chat CTA in empty state.
-
-**BLOCKER (discoverability copy) — PC path under-taught**
-
-- Phone Pair hint at 11px is the only front-door URL instruction.
-- Hub startup silence means operators who never open `/pair` never see a QR.
-
-**Pass notes:** Tailwind/generic “Submit / Click Here / OK” not used as primary CTAs. Mesh/Hub/Cursor error paths generally recovery-oriented. Light/PC-local framing present (“No cloud login”).
-
----
-
-### Pillar 2: Visuals (2/4)
-
-**Pass:** Pair **Scan QR** is a clear primary anchor (accent pill, icon + label). Account uses Settings-style cards. Home has New Chat row + Search (Amendment A direction). Hub pair page QR is a strong focal point; light calm matches product lock.
-
-**WARNING — Pair hierarchy collapse**
-
-- Critical URL lives in `styles.hint` (11px muted) while title is 24/700 — eye misses the operator step.
-- `justifyContent: 'center'` visually centers a tall form; when clipped, top title/Scan QR can leave viewport first or last depending on keyboard — no reliable scroll affordance.
-
-**WARNING — Home IA vs Amendment A**
-
-- New Chat + Search + project groups exist; SPEC labels **Projects** / **Repositories** + profile footer not fully matched (tree is project-centric Agents list). Acceptable progress, not contract-complete.
-
-**WARNING — Composer `+` sheet density**
-
-- Mode cards + five rows without internal scroll — secondary overflow risk.
-
-**a11y:** Scan QR, Search chats, Refresh from computer, Choose computer, Composer model pill labeled. Composer **+** should keep `accessibilityLabel="Composer actions"` (verify on implement polish).
-
----
-
-### Pillar 3: Color (3/4)
-
-**Pass:** Dominant `#f4f5f7`, surfaces white/`#eef0f3`, accent `#1e6b4a`, danger/warn match SPEC. Hub pair page uses the same palette. Not OLED / not purple-glow.
-
-**WARNING — User bubble tint**
-
-- SPEC bubble user: `#f0f1f3`  
-- `theme.bubbleUser`: `#e6f2ec` (green wash) — used by LiveChat  
-- HistoryRead hardcodes `#f0f1f3` — **inconsistent** across chats
-
-**WARNING — Hardcoded hex still in screens** (e.g. QrScanner `#000`, HistoryRead bubble) — SPEC build practice: tokens via `theme.ts`.
-
-Accent reservation mostly respected (CTAs, chip, Approve). Score 3: contract substantially met for brand direction; bubble + token leakage keep it off 4.
-
----
+- 29 hardcoded hex values in screens/components outside `theme.ts`: `#fdecea` (HistoryRead:598,616; UpdateScreen:361), `#fff4e0` (HistoryRead:646; ChatsHome:522), `#fff7e0`, `#5c3e00`, `#f7f8fa`/`#c5c9d0`/`#c4c8ce` (composer/update), `#e6f4ea`/`#0d5d2c`/`#fce8e6`/`#8c1d18` (diff lines), `#cfe6da` (UpdateCard), `#fff`/`#000` (QrScanner, jump/retry text).
+- WARNING: `colors.bubbleUser` is `#e6f2ec` (green wash); `HistoryReadScreen.tsx:614` hardcodes `#f0f1f3` (matches SPEC). Live and History chat show different user bubbles. Not fixed since 2026-10-14.
+- WARNING: `#1a2e24` (very dark green) as selected-row/chip fill in `EditorScreen.tsx:294` and `FilePickerSheet.tsx:386,412` is a leftover from a dark palette; it clashes with the `#f4f5f7` canvas and needs a contrast check against `text`.
+- Accent use is mostly disciplined (Send, chip online, Approve, link/View changes). Working-bar fill and `statusDotLive` use accent as intended.
+- Known gap: no dark mode (`app.json` `userInterfaceStyle: "light"`, static palette, no `useColorScheme`). SPEC defers it, but this is a phone used at night and a recorded gap.
+- `warn` `#9a6700` on `#fff4e0` is about 4.6:1, passes AA for body text only barely.
 
 ### Pillar 4: Typography (2/4)
 
-**SPEC:** 13 / 16 / 20 / 28 · weights **400** and **600** only.
+Contract: 13 / 16 / 20 / 28, weights 400 and 600.
 
-**Implemented (91 UI modules scanned):**
+| Size | Uses | | Weight | Uses |
+|------|------|-|--------|------|
+| 11 | 10 | | 400 | 2 |
+| 12 | 42 | | 500 | 6 |
+| 13 | 35 | | 600 | 48 |
+| 14 | 22 | | 700 | 40 |
+| 15 | 14 | | | |
+| 16 | 24 | | | |
+| 17 / 18 | 9 | | | |
+| 22 / 24 | 8 | | | |
 
-| Size px | Occurrences (approx) |
-|---------|----------------------|
-| 11 | 13 |
-| 12 | 46 |
-| 13 | 32 |
-| 14 | 16 |
-| 15 | 14 |
-| 16 | 24 |
-| 17–18 | 8 |
-| 20 | 1 |
-| 22–24 | 9 |
+- 10 distinct sizes; 12 and 14 are the most common after 13/16, so the scale is effectively 11–24 with no discipline. 700 is used 40 times (Retry, jump pill, titles) against a 600-only contract.
+- 11px text still exists (10 uses). Minimum should be 13 for operator-critical labels.
+- The recent chat work consistently uses 14/700 for action text (`retryText`, `jumpText`) rather than tokens (`type.meta`/`type.body`).
+- `type` in `theme.ts` lacks weight and line-height tokens, so screens cannot comply without literals.
 
-Weights include **500** and **700** widely (Pair Scan CTA 700, titles 700). Display 28 exists via `type.title` on Account; Pair title uses 24/700 outside scale.
+### Pillar 5: Spacing (2/4)
 
-**WARNING:** Pair URL hint at **11px** is both type and hierarchy failure.
+- Good: touch targets are explicitly 48dp (`action`, `jump`, `changesBar`, `workingBar`, composer `touch48`, `modelPill`, sheet rows 52); Home rows 44-48. Exceeds the 44 minimum.
+- Good: `HistoryReadScreen` and `LiveChatScreen` use `KeyboardAvoidingView behavior="padding"` with `keyboardVerticalOffset={headerHeight}` and bottom safe-area inset passed to the composer; the Android edge-to-edge keyboard fix is present in code (unverified on device).
+- WARNING: `theme.spacing` is xs=6, sm=10, md=16, lg=24, xl=32; SPEC is 4/8/16/24/32/48/64. Not migrated. Most chat layout uses `xs`/`sm`, so the entire chat inherits the off-scale values.
+- WARNING: raw literals `gap: 2` (8 uses), `gap: 6`, `marginTop: 2`, `paddingVertical: 10` bypass tokens.
+- Stacked bars above the composer (see Visuals) use inconsistent padding (`spacing.md` vs `spacing.xs` vertical).
 
----
+### Pillar 6: Experience Design (3/4)
 
-### Pillar 5: Spacing (1/4)
+State coverage (good)
+- Delivery state machine with Retry/Discard and "definitely not sent" handling (`chat/outgoing.ts`, `HistoryReadScreen.tsx:438-473`); text is never lost on failed send; unlock-cancel keeps text.
+- Stop confirmation, `stopping` state, "Stopping…" label, errors for stop/approve/deny/edit with reasons.
+- Live regions (`polite` for working/loading/waiting, `assertive` for errors and failed delivery); haptics through `buzz`; `useReducedMotion` gates animated scroll.
+- Loading, empty, error, offline banner (`cursorAlert`), unseen-new-messages counter, changes bar, Edit and resend.
 
-**BLOCKER — PairScreen layout model**
-
-```419:424:apps/mobile/src/screens/PairScreen.tsx
-  content: {
-    flex: 1,
-    padding: spacing.lg,
-    gap: spacing.sm,
-    justifyContent: 'center',
-  },
-```
-
-No scroll container. Android `KeyboardAvoidingView` `behavior` is `undefined` — keyboard covers fields.
-
-**WARNING — Theme scale still pre-migration**
-
-- SPEC: 4 / 8 / 16 / 24 / 32 / 48 / 64  
-- `theme.spacing`: xs=**6**, sm=**10**, md=16, lg=24, xl=32 — no 2xl/3xl
-
-**WARNING — Plus sheet** without vertical scroll (see track A).
-
-Account/Home/Health spacing is usable; Pair alone justifies score **1**.
+Gaps
+- WARNING: History chat refreshes via 4 s polling plus reconcile (`HistoryReadScreen.tsx:47,128`), not WS. A 1 s `setTick` re-renders the entire screen (including every `Markdown` message) while running.
+- WARNING: whole transcript in a `ScrollView` with `.map` (no virtualization, no memoized row) — long chats will jank; LiveChat uses `FlatList`, so the two chat screens diverge.
+- WARNING: Deny is irreversible with no Undo (SPEC F4); Approve is one tap with no unlock because `lockSend` is off by default.
+- WARNING: motion is effectively absent: `useReducedMotion` is used only for `scrollToEnd`; `ActivityIndicator` is the only animation; no entrance or state transition for new messages or the working bar. Calm motion contract (G3) unmet beyond `CalmEnter` (`motion/calmEnter.tsx`) on other screens.
+- WARNING: `waiting_approval` without loadable approvals tells the operator to "approve or deny it in Cursor on your PC" — honest, but a dead end on the phone.
+- Not tested on a device: keyboard avoidance, edge-to-edge, 48dp targets, TalkBack announcement order, reduce-motion behavior are all code-verified only.
+- Registry audit: skipped (`components.json` absent).
 
 ---
 
-### Pillar 6: Experience Design (1/4)
+## Fixed since 2026-10-14
 
-**BLOCKER — Motion stack empty**
-
-- UI-SPEC Motion Notes + stack lock (`Animated` / Reanimated) unmet.  
-- No reduce-motion path. F9 haptics absent.
-
-**BLOCKER — Pairing operator loop incomplete without docs tribal knowledge**
-
-- Page works if discovered; Hub does not advertise it at boot; phone under-emphasizes it → users fail before Scan QR.
-
-**WARNING — Clear pairing one-shot**
-
-- Accidental tap unpairs with no undo snackbar / confirm.
-
-**WARNING — Jank / re-render risks**
-
-- ChatsHome: focus + WS + **15s poll** (`POLL_MS`) — fine for metal, but list rows should stay memoized; missing FlatList window tuning as session count grows.  
-- AccountScreen comment documents prior refresh/WS loop (fixed) — keep that discipline.
-
-**Pass notes:** Loading spinners on Pair/Account/Home; offline/connection chip paths; Refresh now present; fail-closed empty models direction exists elsewhere; QrScanner modal implemented (SPEC “camera planned” is now partly shipped — update inventory later).
-
-Registry audit: **skipped** — `components.json` absent; UI-SPEC Registry Safety = none.
-
----
-
-## Actionable fix list (ordered)
-
-| # | Severity | Fix |
-|---|----------|-----|
-| 1 | BLOCKER | PairScreen: `ScrollView` + top-aligned content; Android keyboard vertical offset; keep Scan QR above the fold without centering the whole form |
-| 2 | BLOCKER | Hub `cli.ts`: on listen, log `Pair QR page (PC only): http://127.0.0.1:${port}/pair` |
-| 3 | BLOCKER | Pair + Account copy: numbered **PC:** open `/pair` → **Phone:** Scan QR; promote off 11px hint |
-| 4 | BLOCKER | Clear pairing: `Alert.alert` with SPEC destructive copy before `clearDevice` |
-| 5 | WARNING | ChatComposer `+` Modal: wrap sheet body in `ScrollView` |
-| 6 | WARNING | Align CTAs: **Pair with Hub**, **Approve tool** / **Deny tool** visible labels |
-| 7 | WARNING | `theme.bubbleUser` → `#f0f1f3`; remove Live/History bubble mismatch |
-| 8 | WARNING | Migrate `theme.spacing` to 4pt scale; Pair/Account consume tokens only |
-| 9 | WARNING | Introduce minimal `Animated` for pair success + sheet open; honor reduce-motion |
-| 10 | WARNING | FlatList: `initialNumToRender` / memoized `ChatListRow`; avoid full-tree re-render on 15s poll |
-
----
-
-## Screenshots
-
-| File | Notes |
-|------|-------|
-| `.planning/ui-reviews/05-20261014-034149/hub-pair-desktop.png` | PC pair page — QR + code + light calm (gitignored binaries) |
-| `.planning/ui-reviews/05-20261014-034149/hub-pair-narrow.png` | Narrow viewport — card scrollbars / meta clipping |
-
-Mobile screens: **code-only** (no Expo Metro / device bridge in this audit turn).
+- PairScreen scroll and PC `/pair` discoverability (Hub console line, PC hero, phone steps card, Account How it works) — shipped earlier, still present.
+- Clear pairing now confirms via `Alert`; CTA renamed **Pair with Hub**.
+- `+` sheet wrapped in `ScrollView`.
+- Delivery states, Retry, jump-to-latest, timestamps, working bar, changes bar, stop confirm, 48dp targets, live regions: new since the last audit.
+- Typography, `theme.spacing` scale, and `bubbleUser` token: still open.
 
 ---
 
 ## Files Audited
 
-- `.planning/phases/05-mobile-ux-contract/05-UI-SPEC.md`
-- `.planning/phases/05-mobile-ux-contract/05-UI-REVIEW.md` (prior checker — superseded by this audit)
-- `apps/mobile/src/screens/PairScreen.tsx`
-- `apps/mobile/src/screens/AccountScreen.tsx`
-- `apps/mobile/src/screens/ChatsHomeScreen.tsx`
-- `apps/mobile/src/screens/HomeScreen.tsx` (shim)
-- `apps/mobile/src/screens/HealthScreen.tsx` (scroll presence)
-- `apps/mobile/src/screens/LiveChatScreen.tsx` / `HistoryReadScreen.tsx` (bubble + list)
-- `apps/mobile/src/composer/ChatComposer.tsx` (sheets)
-- `apps/mobile/src/components/ApprovalCard.tsx`, `FilePickerSheet.tsx`, `QrScanner.tsx`
-- `apps/mobile/src/theme.ts`
-- `packages/hub/src/pair-page.ts`
-- `packages/hub/src/cli.ts`
-- Scan: all `apps/mobile/src/screens/*.tsx` for ScrollView/FlatList; repo-wide Animated/Reanimated = none
-
----
-
-## Note on prior checker review
-
-The previous `05-UI-REVIEW.md` content was a **UI-SPEC checker** FLAG (docs/contract quality, amendments A–F). That historical verdict remains true for *plan* readiness; this document replaces it as the **implementation visual audit**. Re-run gsd-ui-checker separately if the contract text changes again.
+- `.planning/phases/05-mobile-ux-contract/05-UI-SPEC.md`, `05-UI-REVIEW.2026-10-14.md`
+- `apps/mobile/src/screens/HistoryReadScreen.tsx` (full), `LiveChatScreen.tsx`, `ChatsHomeScreen.tsx`, `AccountScreen.tsx` (targeted)
+- `apps/mobile/src/composer/ChatComposer.tsx`
+- `apps/mobile/src/components/ApprovalCard.tsx`, `QrScanner.tsx`, `FilePickerSheet.tsx`
+- `apps/mobile/src/chat/{outgoing,feedback,format,useReducedMotion}.ts`
+- `apps/mobile/src/hub/send-errors.ts`
+- `apps/mobile/src/theme.ts`, `apps/mobile/App.tsx`, `apps/mobile/app.json`
+- Repo-wide greps for font sizes/weights, hex literals, spacing literals, motion usage
