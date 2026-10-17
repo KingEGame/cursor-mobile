@@ -1,5 +1,5 @@
 import type { MentionResult, MentionTrigger } from "./mentions.js";
-import type { ChatSendResult, ComposerSendOptions } from "./chat-send.js";
+import type { ChatSendResult, ComposerSendOptions, DraftState } from "./chat-send.js";
 import type { SidebarScrapeResult } from "./sidebar-scrape.js";
 /** Live adapter health triad (TOR-06). */
 export type LiveHealthState = "cdp_ok" | "extractor_stale" | "cursor_down";
@@ -321,6 +321,15 @@ export interface LiveCursorAdapter {
    * type + submit `text`. Requires send_message VERIFIED; never types into another chat.
    */
   sendToAgentChat(composerId: string, text: string, composer?: ComposerSendOptions): Promise<ChatSendResult>;
+
+  /** PC composer text of `composerId` (only readable while that chat is open on the PC). */
+  readAgentDraft(composerId: string): Promise<DraftState>;
+
+  /** Replace the PC composer text of the open chat `composerId` ("" clears it). */
+  writeAgentDraft(composerId: string, text: string): Promise<{ ok: boolean; state: DraftState }>;
+
+  /** Raise Cursor and open `composerId` on the PC without typing anything. */
+  showAgentChat(composerId: string): Promise<ChatSendResult>;
 
   /** Open `composerId` on the PC and click Stop generation; NOT_RUNNING when idle. */
   stopAgentChat(composerId: string): Promise<ChatSendResult>;

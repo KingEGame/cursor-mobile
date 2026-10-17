@@ -42,6 +42,70 @@ export async function clearComposer(client: CdpClient): Promise<void> {
   }
 }
 
+const squashWs = (t: string) => t.replace(/\s+/g, " ").trim();
+
+export interface DraftState {
+  /** This chat is the one open in the PC Agents window (only its composer is mounted). */
+  open: boolean;
+  /** Text in the PC composer; null when the chat is not open or has no editor. */
+  text: string | null;
+  /** Mention chips or pasted images sit in the box: plain text sync must not touch it. */
+  hasAttachments: boolean;
+}
+
+/** Read-only: what the PC composer of `composerId` holds. Never switches chats. */
+export async function readDraft(client: CdpClient, composerId: string, methods: string[] = []): Promise<DraftState> {
+  if ((await readOpenChatId(client, methods)) !== composerId) return { open: false, text: null, hasAttachments: false };
+  const d = await evaluate<{ text: string; chips: number; images: number } | null>(
+    client,
+    `(() => {
+      const e = document.querySelector(".ui-prompt-input-editor__input[contenteditable='true']");
+      if (!e) return null;
+      return {
+        text: (e.textContent || "").replace(/\\s+/g, " ").trim(),
+        chips: e.querySelectorAll(".node-mentionNode, .node-commandNode").length,
+        images: document.querySelectorAll('[aria-label="Remove image"]').length,
+      };
+    })()`,
+    methods,
+  );
+  if (!d) return { open: true, text: null, hasAttachments: false };
+  return { open: true, text: d.text, hasAttachments: d.chips > 0 || d.images > 0 };
+}
+
+/**
+ * Replace the PC composer text of the open chat `composerId` with `text` ("" clears it).
+ * Does nothing when the chat is not open or the box holds chips/images; reads the result back.
+ */
+export async function writeDraft(
+  client: CdpClient,
+  composerId: string,
+  text: string,
+  methods: string[] = [],
+): Promise<{ ok: boolean; state: DraftState }> {
+  const before = await readDraft(client, composerId, methods);
+  if (!before.open || before.text === null || before.hasAttachments) return { ok: false, state: before };
+  if (squashWs(before.text) === squashWs(text)) return { ok: true, state: before };
+  await evaluate(
+    client,
+    `(() => { const e = document.querySelector(".ui-prompt-input-editor__input[contenteditable='true']"); if (e) e.focus(); return true; })()`,
+    methods,
+  );
+  for (const type of ["rawKeyDown", "keyUp"] as const) {
+    await client.send("Input.dispatchKeyEvent", { type, key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
+  }
+  if (text) {
+    methods.push("Input.insertText");
+    await client.send("Input.insertText", { text });
+  } else {
+    for (const type of ["rawKeyDown", "keyUp"] as const) {
+      await client.send("Input.dispatchKeyEvent", { type, key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
+    }
+  }
+  const after = await readDraft(client, composerId, methods);
+  return { ok: after.text !== null && squashWs(after.text) === squashWs(text), state: after };
+}
+
 /**
  * Apply mode/model, insert chips, then type `text` at the end and submit — all verified.
  * On any failure the composer is cleared so nothing half-made is left on the PC.
@@ -69,7 +133,12 @@ async function composeAndSubmit(
     })()`,
     methods,
   );
-  if (draft && (draft.text || draft.chips || draft.images)) {
+  // The phone mirrors its draft into the PC box, so the same text there is ours: submit it.
+  const preTyped =
+    !!draft && typeof draft.text === "string" && !draft.chips && !draft.images && squashWs(draft.text) === squashWs(text) && !composer?.mentions?.length && !composer?.images?.length;
+  const mirroredSameText =
+    !!draft && typeof draft.text === "string" && !draft.chips && !draft.images && squashWs(draft.text) === squashWs(text);
+  if (draft && (draft.text || draft.chips || draft.images) && !preTyped && !mirroredSameText) {
     const preview = draft.text.length > 60 ? `${draft.text.slice(0, 60)}…` : draft.text;
     return {
       ok: false,
@@ -79,6 +148,11 @@ async function composeAndSubmit(
         : "The PC chat box already has attachments waiting. Send or clear them in Cursor first — nothing was typed.",
       methods,
     };
+  }
+  // Mirrored text plus chips/images/options: the chips go in first, so start from an empty box
+  // (the text is typed again after them below).
+  if (draft && draft.text && !draft.chips && !draft.images && squashWs(draft.text) === squashWs(text) && !preTyped) {
+    await clearComposer(client);
   }
   if (composer?.mode || composer?.model) {
     const applied = await applyComposerOptions(client, composer, wait);
@@ -104,12 +178,17 @@ async function composeAndSubmit(
     for (const type of ["keyDown", "keyUp"] as const) {
       await client.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     }
+  } else if (preTyped) {
+    await evaluate(client, `(() => { const e = document.querySelector(".ui-prompt-input-editor__input[contenteditable='true']"); if (e) e.focus(); return true; })()`, methods);
+    for (const type of ["keyDown", "keyUp"] as const) {
+      await client.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    }
   } else {
     const typed = await executeTypeAndSubmit(client, "send_message", sendSelector, text);
     methods.push(...typed.methods);
     if (!typed.ok) return { ok: false, code: "CDP_INPUT_FAILED", error: typed.error, methods };
   }
-  if (!(await confirmSubmitted(client, methods, wait))) {
+  if (!(await confirmSubmitted(client, methods, wait, text))) {
     return {
       ok: false,
       code: "SEND_NOT_CONFIRMED",
@@ -164,7 +243,14 @@ async function evaluate<T>(client: CdpClient, expression: string, methods: strin
 export async function readOpenChatId(client: CdpClient, methods: string[] = []): Promise<string | null> {
   return evaluate<string>(
     client,
-    `(() => { const el = document.querySelector("[data-composer-id]"); return el ? el.getAttribute("data-composer-id") : null; })()`,
+    // Older Cursor marks the open chat with data-composer-id; the Glass Agents window
+    // (2026-10) mounts only the open chat and tags it data-glass-agent-id / data-tab-id.
+    `(() => {
+      const el = document.querySelector("[data-composer-id]");
+      if (el) return el.getAttribute("data-composer-id");
+      const glass = document.querySelector("[data-glass-agent-id]") || document.querySelector("[role=tabpanel][data-tab-id]");
+      return glass ? (glass.getAttribute("data-glass-agent-id") || glass.getAttribute("data-tab-id")) : null;
+    })()`,
     methods,
   );
 }
@@ -318,6 +404,19 @@ export async function stopAgentChat(
   }
 }
 
+/** Bring the Cursor window forward and open `composerId` on the PC; types nothing. */
+export async function showAgentChat(
+  client: CdpClient,
+  composerId: string,
+  opts: { wait?: Wait; switchTimeoutMs?: number; targetId?: string | null } = {},
+): Promise<ChatSendResult> {
+  const raised = await ensureCursorWindowRaised(client, { targetId: opts.targetId });
+  if (!raised.ok) {
+    return { ok: false, code: raised.code, error: raised.error, methods: raised.methods };
+  }
+  return openAgentChat(client, composerId, opts);
+}
+
 /**
  * Start a new Agents chat in one project and send its first message.
  *
@@ -442,20 +541,45 @@ export async function confirmSubmitted(
   client: CdpClient,
   methods: string[],
   wait: Wait = realWait,
+  typed?: string,
 ): Promise<boolean> {
+  // Cursor can be slow to clear the box while it starts a run; a click on "Send" in that
+  // window would be a second submit, so give Enter time first.
   const emptied = async (ms: number) => {
     for (let waited = 0; waited <= ms; waited += 200) {
       const text = await evaluate<string | null>(client, EDITOR_TEXT, methods);
       if (text === "") return true;
+      // The box can keep showing text while the message already sits in the transcript.
+      if (typed && waited >= 1000 && (await messageShown(client, typed, methods))) return true;
       await wait(200);
     }
     return false;
   };
-  if (await emptied(1200)) return true;
+  if (await emptied(2400)) return true;
   const send = await resolveElementCenter(client, ['.ui-prompt-input-submit-button[aria-label="Send message"]'], methods);
   if (!send) return false;
+  // Re-check right before clicking: the message may have landed while we looked for the button.
+  if (typed && (await messageShown(client, typed, methods))) return true;
   await dispatchClick(client, send.box.x, send.box.y, methods);
-  return emptied(2000);
+  return emptied(3000);
+}
+
+/** The typed text is the end of a message row in the open chat (so Cursor accepted it). */
+async function messageShown(client: CdpClient, typed: string, methods: string[]): Promise<boolean> {
+  const want = JSON.stringify(typed.replace(/\s+/g, " ").trim());
+  const found = await evaluate<boolean>(
+    client,
+    `(() => {
+      const want = ${want};
+      const ed = document.querySelector(".ui-prompt-input-editor__input[contenteditable='true']");
+      const draft = ed ? ed.textContent.replace(/\\s+/g, " ").trim() : "";
+      const rows = Array.from(document.querySelectorAll("[data-message-id]"));
+      // Only meaningful while the box still shows text: a row ending with it means Cursor took it.
+      return draft !== "" && rows.slice(-3).some((r) => (r.innerText || "").replace(/\\s+/g, " ").trim().endsWith(want));
+    })()`,
+    methods,
+  );
+  return found === true;
 }
 
 const BUBBLE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

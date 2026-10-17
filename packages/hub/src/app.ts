@@ -16,6 +16,27 @@ export function createApp(ctx: HubContext): Express {
   app.use("/v1/agents", express.json({ limit: "12mb" }));
   app.use(express.json({ limit: "256kb" }));
 
+  // One line per failed request and per write, so "the phone could not send" is visible in
+  // `journalctl --user -u cursor-mobile-hub` with the exact Hub error code.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const started = Date.now();
+    let code = "";
+    const json = res.json.bind(res);
+    res.json = ((body: unknown) => {
+      code = (body as { error?: { code?: string } } | null)?.error?.code ?? "";
+      return json(body);
+    }) as typeof res.json;
+    res.on("finish", () => {
+      const write = req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS";
+      if (res.statusCode < 400 && !write) return;
+      const ua = String(req.headers["user-agent"] ?? "").slice(0, 40);
+      console.log(
+        `[hub] ${req.method} ${req.originalUrl.split("?")[0]} -> ${res.statusCode}${code ? ` ${code}` : ""} ${Date.now() - started}ms from ${req.ip} ${ua}`,
+      );
+    });
+    next();
+  });
+
   const api = createApiRouter(ctx);
   // TOR-03 versioned surface
   app.use("/v1", api);

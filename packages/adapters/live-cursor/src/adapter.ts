@@ -2,6 +2,10 @@ import { listMentionOptions as listMentionOptionsRun, type MentionResult, type M
 import {
   sendToAgentChat as sendAgentChatMessage,
   stopAgentChat as stopAgentChatRun,
+  showAgentChat as showAgentChatRun,
+  readDraft as readDraftRun,
+  writeDraft as writeDraftRun,
+  type DraftState,
   newAgentChat as newAgentChatRun,
   editAgentMessage as editAgentMessageRun,
   openAgentChat as openAgentChatRun,
@@ -17,6 +21,7 @@ import {
 import { randomBytes } from "node:crypto";
 import {
   defaultCdpClientFactory,
+  type CdpClient,
   type CdpClientFactory,
 } from "./cdp-client.js";
 import {
@@ -1046,6 +1051,67 @@ export class LiveCursorAdapterImpl implements LiveCursorAdapter {
     }
   }
 
+  /** Run `fn` with a short-lived CDP session; null when Cursor/CDP is not reachable. */
+  private async withCdp<T>(fn: (client: CdpClient) => Promise<T>): Promise<T | null> {
+    const health = await this.getHealth();
+    if (health.state === "cursor_down") return null;
+    const debuggerUrl = this.resolveDebuggerUrl();
+    if (!debuggerUrl) return null;
+    let client;
+    try {
+      client = await this.cdpClientFactory(debuggerUrl);
+    } catch {
+      return null;
+    }
+    try {
+      return await fn(client);
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
+  async readAgentDraft(composerId: string): Promise<DraftState> {
+    return (
+      (await this.withCdp((c) => readDraftRun(c, composerId))) ?? { open: false, text: null, hasAttachments: false }
+    );
+  }
+
+  async writeAgentDraft(composerId: string, text: string): Promise<{ ok: boolean; state: DraftState }> {
+    return (
+      (await this.withCdp((c) => writeDraftRun(c, composerId, text))) ?? {
+        ok: false,
+        state: { open: false, text: null, hasAttachments: false },
+      }
+    );
+  }
+
+  async showAgentChat(composerId: string): Promise<ChatSendResult> {
+    const health = await this.getHealth();
+    if (health.state === "cursor_down") {
+      return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor CDP unreachable", methods: [] };
+    }
+    const debuggerUrl = this.resolveDebuggerUrl();
+    if (!debuggerUrl) {
+      return { ok: false, code: "CDP_INPUT_FAILED", error: "No loopback CDP debugger URL", methods: [] };
+    }
+    let client;
+    try {
+      client = await this.cdpClientFactory(debuggerUrl);
+    } catch (err) {
+      return {
+        ok: false,
+        code: "CDP_INPUT_FAILED",
+        error: err instanceof Error ? err.message : "Failed to open CDP session",
+        methods: [],
+      };
+    }
+    try {
+      return await showAgentChatRun(client, composerId, { targetId: this.windows[0]?.targetId ?? null });
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
   async stopAgentChat(composerId: string): Promise<ChatSendResult> {
     const health = await this.getHealth();
     if (health.state === "cursor_down") {
@@ -1261,6 +1327,11 @@ export function createMockLiveCursorAdapter(
     (overrides.sessions ?? []).map((s) => [s.id, s]),
   );
   const approvals = new Map<string, PendingApprovalInfo>();
+  /** Mock PC composer draft of the chat open on the "PC" (first sidebar chat). */
+  const mockDraft = {
+    chat: (overrides.sidebarSections ?? []).flatMap((sec) => sec.chats)[0]?.composerId ?? "",
+    text: "",
+  };
   /** Messages accepted by mock sendToAgentChat (tests assert on this). */
   const sentToAgentChats: Array<{ composerId: string; text: string }> = [];
 
@@ -1693,6 +1764,26 @@ export function createMockLiveCursorAdapter(
             ? [{ label: "AGENTS.md", detail: "", hint: "" }]
             : [{ label: "goal", detail: "Set a goal", hint: "" }],
       };
+    },
+    async readAgentDraft(composerId) {
+      return { open: composerId === mockDraft.chat, text: composerId === mockDraft.chat ? mockDraft.text : null, hasAttachments: false };
+    },
+    async writeAgentDraft(composerId, text) {
+      if (composerId !== mockDraft.chat) return { ok: false, state: { open: false, text: null, hasAttachments: false } };
+      mockDraft.text = text;
+      return { ok: true, state: { open: true, text, hasAttachments: false } };
+    },
+    async showAgentChat(composerId) {
+      if (healthState !== "cdp_ok") {
+        return { ok: false, code: "CDP_INPUT_FAILED", error: "Cursor down", methods: [] };
+      }
+      const chat = (overrides.sidebarSections ?? [])
+        .flatMap((sec) => sec.chats)
+        .find((c) => c.composerId === composerId);
+      if (!chat) {
+        return { ok: false, code: "CHAT_NOT_IN_SIDEBAR", error: "Chat is not in the PC Agents sidebar", methods: [] };
+      }
+      return { ok: true, switched: false, methods: [] };
     },
     async stopAgentChat(composerId) {
       if (healthState !== "cdp_ok") {

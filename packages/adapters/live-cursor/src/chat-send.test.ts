@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createMockCdpClient } from "./cdp-client.js";
-import { editAgentMessage, newAgentChat, openAgentChat, sendToAgentChat, stopAgentChat } from "./chat-send.js";
+import { editAgentMessage, newAgentChat, openAgentChat, readDraft, sendToAgentChat, stopAgentChat, writeDraft } from "./chat-send.js";
 import type { ActionSelector } from "./selector-pack.js";
 
 const TARGET = "466762d6-04ca-46e6-a047-4ad7932ae829";
@@ -241,5 +241,44 @@ describe("editAgentMessage", () => {
   it("rejects ids that are not Cursor message ids", async () => {
     const res = await editAgentMessage(fakeEdit(), TARGET, "m_bad", "x", { wait: noWait });
     expect(res).toMatchObject({ ok: false, code: "MESSAGE_NOT_FOUND" });
+  });
+});
+
+describe("draft mirroring", () => {
+  it("reads the PC composer only for the chat that is open", async () => {
+    expect(await readDraft(fakeCursor({ open: TARGET, draft: "half a thought" }), TARGET)).toMatchObject({
+      open: true,
+      text: "half a thought",
+    });
+    expect(await readDraft(fakeCursor({ open: OTHER, draft: "other chat" }), TARGET)).toMatchObject({ open: false, text: null });
+  });
+
+  it("refuses to write into a chat that is not open and sends no keys", async () => {
+    const client = fakeCursor({ open: OTHER });
+    const res = await writeDraft(client, TARGET, "hello");
+    expect(res.ok).toBe(false);
+    expect(methods(client)).not.toContain("Input.dispatchKeyEvent");
+    expect(methods(client)).not.toContain("Input.insertText");
+  });
+
+  it("leaves the box alone when it already holds the same text", async () => {
+    const client = fakeCursor({ open: TARGET, draft: "same" });
+    expect((await writeDraft(client, TARGET, "same")).ok).toBe(true);
+    expect(methods(client)).not.toContain("Input.insertText");
+  });
+
+  it("submits a draft the phone already mirrored instead of typing it again or refusing", async () => {
+    const client = fakeCursor({ open: TARGET, draft: "ship it" });
+    const res = await sendToAgentChat(client, TARGET, "ship it", sendSelector, { wait: noWait });
+    expect(res.ok).toBe(true);
+    expect(methods(client)).not.toContain("Input.insertText");
+    expect(client.calls.some((c) => c.method === "Input.dispatchKeyEvent" && c.params.key === "Enter")).toBe(true);
+  });
+
+  it("still refuses to send over a different draft", async () => {
+    const client = fakeCursor({ open: TARGET, draft: "someone else's text" });
+    const res = await sendToAgentChat(client, TARGET, "ship it", sendSelector, { wait: noWait });
+    expect(res).toMatchObject({ ok: false, code: "COMPOSER_NOT_EMPTY" });
+    expect(methods(client)).not.toContain("Input.insertText");
   });
 });

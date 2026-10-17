@@ -171,6 +171,28 @@ describe("cursor-mobile MCP", () => {
     expect(t?.annotations?.readOnlyHint).toBe(false);
   });
 
+  it("Hub can open a chat on the PC without typing (phone 'Open on PC')", async () => {
+    await call("cursor_list_projects"); // pairs
+    const hub = new HubClient({ baseUrl, tokens });
+    expect(await hub.call("POST", `/v1/agents/chats/${CHAT}/open`, {})).toMatchObject({ ok: true, composerId: CHAT });
+    await expect(hub.call("POST", "/v1/agents/chats/11111111-1111-4111-8111-111111111111/open", {})).rejects.toMatchObject({
+      code: "CHAT_NOT_IN_SIDEBAR",
+    });
+  });
+
+  it("mirrors a draft between phone and PC composer (open chat only)", async () => {
+    await call("cursor_list_projects"); // pairs
+    const hub = new HubClient({ baseUrl, tokens });
+    const put = await hub.call<any>("PUT", `/v1/agents/chats/${CHAT}/draft`, { text: "half a thought" });
+    expect(put).toMatchObject({ ok: true, open: true, text: "half a thought" });
+    expect(await hub.call("GET", `/v1/agents/chats/${CHAT}/draft`)).toMatchObject({ open: true, text: "half a thought" });
+    // A chat that is not open on the PC has no readable composer, and a write is refused.
+    expect(await hub.call("GET", `/v1/agents/chats/${OTHER}/draft`)).toMatchObject({ open: false, text: null });
+    expect(await hub.call("PUT", `/v1/agents/chats/${OTHER}/draft`, { text: "x" })).toMatchObject({ ok: false, open: false });
+    await expect(hub.call("PUT", `/v1/agents/chats/${CHAT}/draft`, {})).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await hub.call("PUT", `/v1/agents/chats/${CHAT}/draft`, { text: "" });
+  });
+
   it("pairs itself over loopback as a revocable device", async () => {
     const res = await call("cursor_list_projects");
     expect(res.isError).toBe(false);

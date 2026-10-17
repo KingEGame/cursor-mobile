@@ -146,6 +146,10 @@ export {
   newAgentChat,
   STOP_GENERATION_SELECTORS,
   stopAgentChat,
+  showAgentChat,
+  readDraft,
+  writeDraft,
+  type DraftState,
 } from "./chat-send.js";
 export type { ChatSendResult } from "./chat-send.js";
 

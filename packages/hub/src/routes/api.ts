@@ -1782,6 +1782,56 @@ export function createApiRouter(ctx: HubContext): Router {
     }),
   );
 
+  /** PC composer text of this chat (readable only while the chat is open on the PC). */
+  router.get(
+    "/agents/chats/:composerId/draft",
+    requirePaired(ctx),
+    asyncRoute(async (req, res) => {
+      const composerId = agentComposerId(req.params.composerId);
+      const state = await ctx.live.readAgentDraft(composerId);
+      res.status(200).json({ composerId, open: state.open, text: state.text, hasAttachments: state.hasAttachments });
+    }),
+  );
+
+  /** Mirror the phone's draft into the PC composer; refuses (ok:false) unless the chat is open there. */
+  router.put(
+    "/agents/chats/:composerId/draft",
+    requirePaired(ctx),
+    asyncRoute(async (req, res) => {
+      const composerId = agentComposerId(req.params.composerId);
+      const text = typeof req.body?.text === "string" ? req.body.text : null;
+      if (text === null) throw new ApiError(400, "VALIDATION_ERROR", "text is required");
+      if (text.length > 20_000) throw new ApiError(400, "VALIDATION_ERROR", "text is too long (max 20000 chars)");
+      const result = await ctx.live.writeAgentDraft(composerId, text);
+      res.status(200).json({
+        composerId,
+        ok: result.ok,
+        open: result.state.open,
+        text: result.state.text,
+        hasAttachments: result.state.hasAttachments,
+      });
+    }),
+  );
+
+  router.post(
+    "/agents/chats/:composerId/open",
+    requirePaired(ctx),
+    asyncRoute(async (req, res) => {
+      const composerId = agentComposerId(req.params.composerId);
+      const result = await ctx.live.showAgentChat(composerId);
+      if (!result.ok) {
+        const status =
+          result.code === "CHAT_NOT_IN_SIDEBAR"
+            ? 404
+            : result.code === "CHAT_SWITCH_FAILED" || result.code === "CURSOR_WINDOW_HIDDEN"
+              ? 409
+              : 503;
+        throw new ApiError(status, result.code, result.error);
+      }
+      res.status(202).json({ ok: true, composerId, switchedOnPc: result.switched });
+    }),
+  );
+
   router.post(
     "/agents/chats/:composerId/stop",
     requirePaired(ctx),
