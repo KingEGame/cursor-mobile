@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { X } from 'lucide-react-native';
-import { colors, radii, spacing } from '../theme';
+import { colors, radii, spacing, type, weight } from '../theme';
 
 /**
  * Full-screen camera that reads one QR code (UI-SPEC Amendment D: the PC shows the
@@ -59,12 +59,12 @@ export function QrScanner(props: { visible: boolean; onScan: (data: string) => v
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
+  root: { flex: 1, backgroundColor: colors.scrim, alignItems: 'center', justifyContent: 'center' },
   center: { padding: spacing.lg, alignItems: 'center', gap: spacing.md },
-  text: { color: '#fff', fontSize: 16, textAlign: 'center' },
+  text: { color: colors.onDark, fontSize: type.body, textAlign: 'center' },
   btn: { backgroundColor: colors.accent, borderRadius: radii.pill, paddingHorizontal: spacing.lg, minHeight: 48, justifyContent: 'center' },
-  btnText: { color: colors.accentText, fontWeight: '700' },
-  frame: { position: 'absolute', width: 240, height: 240, borderWidth: 3, borderColor: '#fff', borderRadius: 16 },
-  hint: { position: 'absolute', bottom: 96, color: '#fff', fontSize: 14, paddingHorizontal: spacing.lg, textAlign: 'center' },
+  btnText: { color: colors.accentText, fontWeight: weight.semibold },
+  frame: { position: 'absolute', width: 240, height: 240, borderWidth: 3, borderColor: colors.onDark, borderRadius: 16 },
+  hint: { position: 'absolute', bottom: 96, color: colors.onDark, fontSize: type.meta, paddingHorizontal: spacing.lg, textAlign: 'center' },
   close: { position: 'absolute', top: 48, right: 24 },
 });

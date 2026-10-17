@@ -14,7 +14,7 @@ import { createHubClient } from '../hub/client';
 import { HubApiError, type ChatFileChange, type ChatFileDiff } from '../hub/types';
 import type { RootStackParamList } from '../navigation/types';
 import { useAppSession } from '../session/AppSessionContext';
-import { colors, spacing } from '../theme';
+import { colors, spacing, type, weight, lineHeight } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatChanges'>;
 
@@ -155,8 +155,8 @@ const styles = StyleSheet.create({
   spinner: { marginTop: spacing.xl },
   error: { color: colors.danger, padding: spacing.md },
   header: { padding: spacing.md, gap: spacing.xs },
-  title: { color: colors.text, fontSize: 18, fontWeight: '700' },
-  note: { color: colors.muted, fontSize: 13, lineHeight: 18, paddingHorizontal: spacing.md },
+  title: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
+  note: { color: colors.muted, fontSize: type.meta, lineHeight: lineHeight.meta, paddingHorizontal: spacing.md },
   fileRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -169,13 +169,13 @@ const styles = StyleSheet.create({
   },
   pressed: { backgroundColor: colors.surfaceMuted },
   fileBody: { flex: 1, minWidth: 0 },
-  fileName: { color: colors.text, fontSize: 15, fontWeight: '600' },
-  filePath: { color: colors.muted, fontSize: 11 },
-  counts: { fontSize: 13, fontFamily: MONO },
+  fileName: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
+  filePath: { color: colors.muted, fontSize: type.meta },
+  counts: { fontSize: type.meta, fontFamily: MONO },
   plus: { color: colors.accent },
   minus: { color: colors.danger },
   muted: { color: colors.muted },
-  badge: { color: colors.warn, fontSize: 11, fontWeight: '700' },
+  badge: { color: colors.warn, fontSize: type.meta, fontWeight: weight.semibold },
   diffContent: { padding: spacing.md, gap: spacing.sm },
   hunk: {
     borderWidth: StyleSheet.hairlineWidth,
@@ -186,13 +186,13 @@ const styles = StyleSheet.create({
   },
   hunkHead: {
     fontFamily: MONO,
-    fontSize: 11,
+    fontSize: type.meta,
     color: colors.muted,
     backgroundColor: colors.surfaceMuted,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    paddingVertical: spacing.xxs,
   },
-  line: { fontFamily: MONO, fontSize: 12, lineHeight: 17, paddingHorizontal: spacing.sm, color: colors.text },
-  lineAdd: { backgroundColor: '#e6f4ea', color: '#0d5d2c' },
-  lineDel: { backgroundColor: '#fce8e6', color: '#8c1d18' },
+  line: { fontFamily: MONO, fontSize: type.meta, lineHeight: lineHeight.meta, paddingHorizontal: spacing.sm, color: colors.text },
+  lineAdd: { backgroundColor: colors.successSoft, color: colors.successText },
+  lineDel: { backgroundColor: colors.dangerSoft, color: colors.dangerText },
 });

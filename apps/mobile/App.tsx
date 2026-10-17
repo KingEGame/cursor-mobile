@@ -251,7 +251,7 @@ function RootNavigator() {
       <Stack.Screen
         name="HistoryRead"
         component={HistoryReadScreen}
-        options={{ title: 'Chat' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="NewAgentChat"

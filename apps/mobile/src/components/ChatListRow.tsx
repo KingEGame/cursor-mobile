@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { chatModeHint } from '../hub/chats-home';
 import { formatRelativeTime } from '../hub/format';
 import type { SessionListItem } from '../hub/types';
-import { colors, spacing, type } from '../theme';
+import { colors, spacing, type, weight, lineHeight } from '../theme';
 
 interface Props {
   item: SessionListItem;
@@ -54,20 +54,20 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   disabled: { opacity: 0.45 },
-  main: { gap: 2 },
+  main: { gap: spacing.xxs },
   title: {
     color: colors.text,
     fontSize: type.body,
-    fontWeight: '600',
+    fontWeight: weight.semibold,
   },
   preview: {
     color: colors.muted,
     fontSize: type.meta,
-    lineHeight: 18,
+    lineHeight: lineHeight.meta,
   },
   meta: {
     color: colors.muted,
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: type.meta,
+    marginTop: spacing.xxs,
   },
 });

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { UpdateStatus } from '../hub/app-update';
-import { colors, radii, spacing, type } from '../theme';
+import { colors, radii, spacing, type, weight, lineHeight } from '../theme';
 
 interface Props {
   status: UpdateStatus;
@@ -57,10 +57,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     borderRadius: radii.md,
     padding: spacing.md,
-    gap: 6,
+    gap: spacing.xs,
   },
-  heroTitle: { color: colors.accentText, fontSize: 17, fontWeight: '700' },
-  heroMeta: { color: '#cfe6da', fontSize: type.meta, lineHeight: 18 },
+  heroTitle: { color: colors.accentText, fontSize: type.body, fontWeight: weight.semibold },
+  heroMeta: { color: colors.accentBorder, fontSize: type.meta, lineHeight: lineHeight.meta },
   heroBtn: {
     marginTop: spacing.sm,
     minHeight: 46,
@@ -69,23 +69,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heroBtnText: { color: colors.accent, fontSize: 15, fontWeight: '700' },
+  heroBtnText: { color: colors.accent, fontSize: type.body, fontWeight: weight.semibold },
   pressed: { opacity: 0.85 },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
-    gap: 4,
+    gap: spacing.xxs,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
   },
   cardLabel: {
     color: colors.muted,
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: type.meta,
+    fontWeight: weight.semibold,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  cardValue: { color: colors.text, fontSize: type.body, fontWeight: '600' },
-  cardMeta: { color: colors.muted, fontSize: 13, lineHeight: 18 },
+  cardValue: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
+  cardMeta: { color: colors.muted, fontSize: type.meta, lineHeight: lineHeight.meta },
 });

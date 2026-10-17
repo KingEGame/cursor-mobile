@@ -24,10 +24,14 @@ import { ConnectionChip } from '../components/ConnectionChip';
 import {
   agentRowMeta,
   agentsSyncHint,
+  agentsSyncShort,
   countWaiting,
+  countWorking,
+  filterActive,
   cursorProblem,
   filterAgents,
 } from '../hub/agents-list';
+import { sendFailureText } from '../hub/send-errors';
 import { createHubClient } from '../hub/client';
 import { deriveConnectionState } from '../hub/connection-state';
 import {
@@ -39,7 +43,7 @@ import {
 import { HubWebSocket } from '../hub/ws';
 import type { RootNav } from '../navigation/types';
 import { useAppSession } from '../session/AppSessionContext';
-import { colors, radii, spacing, type } from '../theme';
+import { colors, radii, spacing, type, weight, lineHeight } from '../theme';
 
 /** Background refresh while Chats is visible — the PC sidebar has no push events yet. */
 const POLL_MS = 15_000;
@@ -70,6 +74,7 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
   const [agents, setAgents] = useState<AgentsResponse | null>(null);
   const [lastApiError, setLastApiError] = useState<HubApiError | null>(null);
   const [query, setQuery] = useState('');
+  const [activeOnly, setActiveOnly] = useState(false);
   /** Phone-side collapse toggles; untouched projects follow the PC sidebar. */
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const inFlight = useRef(false);
@@ -119,7 +124,11 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
           return;
         }
         if (err instanceof HubApiError) setLastApiError(err);
-        setError(err instanceof Error ? err.message : 'Refresh failed');
+        setError(
+          err instanceof HubApiError
+            ? sendFailureText(err.code, err.status, err.message)
+            : 'Couldn’t refresh — check your connection.',
+        );
       } finally {
         inFlight.current = false;
         setLoading(false);
@@ -172,8 +181,8 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
   }, [session.hubBaseUrl, session.deviceToken, scheduleRefresh]);
 
   const visible = useMemo(
-    () => (agents ? filterAgents(agents, query) : null),
-    [agents, query],
+    () => (agents ? filterAgents(activeOnly ? filterActive(agents) : agents, query) : null),
+    [agents, query, activeOnly],
   );
 
   const listData: ListEntry[] = useMemo(() => {
@@ -197,6 +206,7 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
     setCollapsed((prev) => ({ ...prev, [project.projectId]: !isCollapsed(project) }));
 
   const waiting = countWaiting(agents);
+  const working = countWorking(agents);
   const hubName = session.hubDisplayName || 'Desk PC';
 
   const openChat = (chat: AgentsChatRow) => {
@@ -221,30 +231,30 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
         />
       </View>
 
-      <Pressable
-        style={({ pressed }) => [styles.newChat, pressed && styles.rowPressed]}
-        onPress={() => navigation.navigate('NewAgentChat')}
-        accessibilityRole="button"
-        accessibilityLabel="New Chat"
-        testID="chats-new-chat"
-      >
-        <SquarePen size={20} color={colors.text} strokeWidth={1.75} />
-        <Text style={styles.newChatText}>New Chat</Text>
-      </Pressable>
-
-      <View style={styles.searchWrap}>
-        <Search size={18} color={colors.muted} strokeWidth={1.75} style={styles.searchIcon} />
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search chats"
-          placeholderTextColor={colors.muted}
-          style={styles.search}
-          accessibilityLabel="Search chats"
-          autoCorrect={false}
-          returnKeyType="search"
-          testID="chats-search"
-        />
+      <View style={styles.searchRow}>
+        <View style={styles.searchWrap}>
+          <Search size={18} color={colors.muted} strokeWidth={1.75} style={styles.searchIcon} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search chats"
+            placeholderTextColor={colors.muted}
+            style={styles.search}
+            accessibilityLabel="Search chats"
+            autoCorrect={false}
+            returnKeyType="search"
+            testID="chats-search"
+          />
+        </View>
+        <Pressable
+          style={({ pressed }) => [styles.newChatBtn, pressed && styles.rowPressed]}
+          onPress={() => navigation.navigate('NewAgentChat')}
+          accessibilityRole="button"
+          accessibilityLabel="New Chat"
+          testID="chats-new-chat"
+        >
+          <SquarePen size={20} color={colors.accentText} strokeWidth={1.75} />
+        </Pressable>
       </View>
 
       {cursorProblem(agents) ? (
@@ -254,22 +264,38 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
       ) : null}
 
       {agents ? (
-        <Text style={styles.syncHint} numberOfLines={2} testID="chats-sync-status">
-          {agentsSyncHint(agents)}
-        </Text>
-      ) : null}
-
-      {waiting > 0 ? (
-        <Pressable
-          onPress={showWaiting}
-          style={styles.waitingPill}
-          accessibilityRole="button"
-          testID="chats-waiting-pill"
-        >
-          <Text style={styles.waitingText}>
-            {waiting} waiting for approval{waiting === 1 ? ' →' : ''}
+        <View style={styles.statusRow}>
+          <Pressable
+            onPress={() => setActiveOnly((v) => !v)}
+            style={[styles.statusChip, activeOnly && styles.statusChipOn]}
+            hitSlop={{ top: 8, bottom: 8 }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: activeOnly }}
+            accessibilityLabel={`${working} agent${working === 1 ? '' : 's'} working. ${activeOnly ? 'Show all chats' : 'Show only active sessions'}`}
+            testID="chats-working-chip"
+          >
+            <View style={[styles.statusDot, working > 0 && styles.statusDotLive]} />
+            <Text style={[styles.statusChipText, activeOnly && styles.statusChipTextOn]}>
+              {working} working
+            </Text>
+          </Pressable>
+          {waiting > 0 ? (
+            <Pressable
+              onPress={waiting === 1 ? showWaiting : () => setActiveOnly(true)}
+              style={styles.waitingPill}
+              hitSlop={{ top: 8, bottom: 8 }}
+              accessibilityRole="button"
+              testID="chats-waiting-pill"
+            >
+              <Text style={styles.waitingText}>
+                {waiting} waiting{waiting === 1 ? ' →' : ''}
+              </Text>
+            </Pressable>
+          ) : null}
+          <Text style={styles.syncHint} numberOfLines={1} testID="chats-sync-status">
+            {activeOnly ? 'Active sessions only' : `${hubName} · ${agentsSyncShort(agents)}`}
           </Text>
-        </Pressable>
+        </View>
       ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -296,14 +322,45 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
             <ActivityIndicator color={colors.accent} style={{ marginTop: spacing.xl }} />
           ) : (
             <View style={styles.empty} testID="chats-empty">
+              {error && !agents ? (
+                <>
+                  <Text style={styles.emptyTitle}>Can’t reach your PC</Text>
+                  <Text style={styles.emptyBody}>
+                    Check that Tailscale is on for this phone and for the PC, then try again.
+                  </Text>
+                  <Pressable
+                    onPress={() => void refresh({ pull: true })}
+                    style={styles.emptyCta}
+                    accessibilityRole="button"
+                    accessibilityLabel="Try again"
+                    testID="chats-retry"
+                  >
+                    <Text style={styles.emptyCtaText}>Try again</Text>
+                  </Pressable>
+                </>
+              ) : null}
+              {!(error && !agents) ? (
+              <>
               <Text style={styles.emptyTitle}>
-                {query.trim() ? 'No matching chats' : 'No chats yet'}
+                {query.trim() ? 'No matching chats' : activeOnly ? 'No agents running' : 'No chats yet'}
               </Text>
               <Text style={styles.emptyBody}>
                 {query.trim()
                   ? 'Try another name, or clear Search.'
                   : 'Open Cursor on the PC and start a chat in the Agents window.'}
               </Text>
+              {!query.trim() && !activeOnly ? (
+                <Pressable
+                  onPress={() => navigation.navigate('NewAgentChat')}
+                  style={styles.emptyCta}
+                  accessibilityRole="button"
+                  accessibilityLabel="New Chat"
+                >
+                  <Text style={styles.emptyCtaText}>New Chat</Text>
+                </Pressable>
+              ) : null}
+              </>
+              ) : null}
             </View>
           )
         }
@@ -392,21 +449,6 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
         }}
       />
 
-      <Pressable
-        style={({ pressed }) => [styles.profile, pressed && styles.rowPressed]}
-        onPress={onOpenAccount}
-        accessibilityRole="button"
-        accessibilityLabel="Account and settings"
-        testID="chats-profile"
-      >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{hubName.slice(0, 1).toUpperCase()}</Text>
-        </View>
-        <Text style={styles.profileName} numberOfLines={1}>
-          {hubName}
-        </Text>
-        <Settings size={20} color={colors.muted} strokeWidth={1.75} />
-      </Pressable>
     </View>
   );
 }
@@ -418,14 +460,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-    paddingTop: spacing.sm,
+    paddingBottom: spacing.xxs,
+    paddingTop: spacing.xxs,
   },
   title: {
     color: colors.text,
-    fontSize: type.title,
-    fontWeight: '700',
-    letterSpacing: -0.4,
+    fontSize: type.sub,
+    fontWeight: weight.semibold,
+  },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.xs },
+  newChatBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   newChat: {
     flexDirection: 'row',
@@ -436,9 +486,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     borderRadius: radii.sm,
   },
-  newChatText: { color: colors.text, fontSize: 16, fontWeight: '600' },
-  searchWrap: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm, justifyContent: 'center' },
-  searchIcon: { position: 'absolute', left: spacing.md + spacing.sm, zIndex: 1 },
+  newChatText: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
+  searchWrap: { flex: 1, justifyContent: 'center' },
+  searchIcon: { position: 'absolute', left: spacing.sm, zIndex: 1 },
   search: {
     paddingLeft: spacing.xl + spacing.xs,
     backgroundColor: colors.surface,
@@ -457,25 +507,45 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md,
     marginBottom: spacing.xs,
     padding: spacing.sm,
-    fontSize: 13,
+    fontSize: type.meta,
   },
   syncHint: {
+    flex: 1,
     color: colors.muted,
-    fontSize: 12,
-    lineHeight: 16,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
+    fontSize: type.meta,
+    lineHeight: lineHeight.meta,
   },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minHeight: 32,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  statusChipOn: { backgroundColor: colors.text, borderColor: colors.text },
+  statusChipText: { color: colors.text, fontWeight: weight.semibold, fontSize: type.meta },
+  statusChipTextOn: { color: colors.onDark },
+  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.muted },
+  statusDotLive: { backgroundColor: colors.accent },
+  statusHint: { color: colors.muted, fontSize: type.meta },
   waitingPill: {
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.sm,
     paddingHorizontal: spacing.md,
     minHeight: 40,
     justifyContent: 'center',
     borderRadius: radii.pill,
-    backgroundColor: '#fff4e0',
+    backgroundColor: colors.warnSoft,
   },
-  waitingText: { color: colors.warn, fontWeight: '600', fontSize: type.meta },
+  waitingText: { color: colors.warn, fontWeight: weight.semibold, fontSize: type.meta },
   error: {
     color: colors.danger,
     paddingHorizontal: spacing.md,
@@ -484,16 +554,25 @@ const styles = StyleSheet.create({
   listContent: { paddingBottom: spacing.lg },
   emptyContainer: { flexGrow: 1, justifyContent: 'center', padding: spacing.lg },
   empty: { alignItems: 'center', gap: spacing.md },
+  emptyCta: {
+    minHeight: 48,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.pill,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyCtaText: { color: colors.accentText, fontSize: type.body, fontWeight: weight.semibold },
   emptyTitle: {
     color: colors.text,
-    fontSize: 22,
-    fontWeight: '600',
+    fontSize: type.sub,
+    fontWeight: weight.semibold,
     textAlign: 'center',
   },
   emptyBody: {
     color: colors.muted,
     fontSize: type.body,
-    lineHeight: 22,
+    lineHeight: lineHeight.body,
     textAlign: 'center',
     maxWidth: 320,
   },
@@ -518,16 +597,16 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     color: colors.text,
     fontSize: type.body,
-    fontWeight: '600',
+    fontWeight: weight.semibold,
   },
-  sectionMeta: { color: colors.muted, fontSize: 12, marginLeft: spacing.sm },
+  sectionMeta: { color: colors.muted, fontSize: type.meta, marginLeft: spacing.sm },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 48,
     marginHorizontal: spacing.sm,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 8,
+    paddingVertical: spacing.xs,
     borderRadius: radii.sm,
   },
   rowActive: { backgroundColor: colors.surfaceMuted },
@@ -545,9 +624,9 @@ const styles = StyleSheet.create({
   markUnread: { backgroundColor: colors.accent },
   rowBody: { flex: 1, minWidth: 0 },
   rowTitle: { color: colors.text, fontSize: type.body },
-  rowTitleUnread: { fontWeight: '600' },
-  rowMeta: { color: colors.muted, fontSize: 12, marginTop: 2 },
-  rowMetaWarn: { color: colors.warn, fontWeight: '600' },
+  rowTitleUnread: { fontWeight: weight.semibold },
+  rowMeta: { color: colors.muted, fontSize: type.meta, marginTop: spacing.xxs },
+  rowMetaWarn: { color: colors.warn, fontWeight: weight.semibold },
   rowMetaError: { color: colors.danger },
   age: { color: colors.muted, fontSize: type.meta, marginLeft: spacing.sm },
   profile: {
@@ -568,6 +647,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: colors.accentText, fontWeight: '700' },
-  profileName: { flex: 1, color: colors.text, fontSize: 15 },
+  avatarText: { color: colors.accentText, fontWeight: weight.semibold },
+  profileName: { flex: 1, color: colors.text, fontSize: type.body },
 });

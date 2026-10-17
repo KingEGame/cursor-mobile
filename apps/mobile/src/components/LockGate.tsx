@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { loadLockSettings, unlock } from '../security/app-lock';
 import { shouldRelock } from '../security/lock-policy';
-import { colors, radii, spacing } from '../theme';
+import { colors, radii, spacing, type, weight } from '../theme';
 
 /**
  * Covers the app until the owner unlocks, when Account → Security → "Lock app on open" is on.
@@ -68,7 +68,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.lg,
   },
-  title: { color: colors.text, fontSize: 22, fontWeight: '700' },
+  title: { color: colors.text, fontSize: type.sub, fontWeight: weight.semibold },
   btn: {
     backgroundColor: colors.accent,
     borderRadius: radii.pill,
@@ -76,5 +76,5 @@ const styles = StyleSheet.create({
     minHeight: 48,
     justifyContent: 'center',
   },
-  btnText: { color: colors.accentText, fontSize: 16, fontWeight: '700' },
+  btnText: { color: colors.accentText, fontSize: type.body, fontWeight: weight.semibold },
 });

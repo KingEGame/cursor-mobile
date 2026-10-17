@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootNav } from '../navigation/types';
-import { colors, spacing, type } from '../theme';
+import { colors, spacing, type, weight } from '../theme';
 import { AccountScreen } from './AccountScreen';
 import { ChatsHomeScreen } from './ChatsHomeScreen';
 
@@ -77,11 +77,11 @@ const styles = StyleSheet.create({
   tabActive: {
     color: colors.accent,
     fontSize: type.body,
-    fontWeight: '700',
+    fontWeight: weight.semibold,
   },
   tabIdle: {
     color: colors.muted,
     fontSize: type.body,
-    fontWeight: '500',
+    fontWeight: weight.semibold,
   },
 });

@@ -26,7 +26,7 @@ import {
 import { HubApiError, isWorkspaceBound } from '../hub/types';
 import type { RootNav } from '../navigation/types';
 import { useAppSession } from '../session/AppSessionContext';
-import { colors, radii, spacing, type } from '../theme';
+import { colors, radii, spacing, type, weight, lineHeight } from '../theme';
 
 interface Props {
   navigation: RootNav;
@@ -301,9 +301,9 @@ function ActionRow(props: { label: string; meta?: string; danger?: boolean; onPr
 }
 
 const styles = StyleSheet.create({
-  section: { color: colors.muted, fontSize: 13, fontWeight: '600', marginTop: spacing.md, marginBottom: spacing.xs },
-  row: { paddingVertical: spacing.xs, gap: 2 },
-  rowTitle: { color: colors.text, fontSize: 16 },
+  section: { color: colors.muted, fontSize: type.meta, fontWeight: weight.semibold, marginTop: spacing.md, marginBottom: spacing.xs },
+  row: { paddingVertical: spacing.xs, gap: spacing.xxs },
+  rowTitle: { color: colors.text, fontSize: type.body },
   pcRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 52, borderRadius: radii.sm, paddingHorizontal: spacing.xs },
   actionRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderRadius: radii.sm, paddingHorizontal: spacing.xs },
   pressed: { backgroundColor: colors.surfaceMuted },
@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     marginTop: spacing.sm,
   },
-  primaryText: { color: colors.accentText, fontWeight: '700', fontSize: 16 },
+  primaryText: { color: colors.accentText, fontWeight: weight.semibold, fontSize: type.body },
   root: { flex: 1, backgroundColor: colors.bg },
   content: {
     paddingHorizontal: spacing.md,
@@ -333,13 +333,13 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: type.title,
-    fontWeight: '700',
+    fontWeight: weight.semibold,
     letterSpacing: -0.4,
   },
   lead: {
     color: colors.muted,
     fontSize: type.meta,
-    lineHeight: 18,
+    lineHeight: lineHeight.meta,
     marginBottom: spacing.sm,
   },
   error: { color: colors.danger, marginBottom: spacing.sm },
@@ -347,26 +347,26 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
-    gap: 4,
+    gap: spacing.xxs,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
   },
   cardLabel: {
     color: colors.muted,
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: type.meta,
+    fontWeight: weight.semibold,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
   cardValue: {
     color: colors.text,
     fontSize: type.body,
-    fontWeight: '600',
+    fontWeight: weight.semibold,
   },
   cardMeta: {
     color: colors.muted,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: type.meta,
+    lineHeight: lineHeight.meta,
   },
   rowBtn: {
     backgroundColor: colors.surface,
@@ -381,17 +381,17 @@ const styles = StyleSheet.create({
   rowBtnText: {
     color: colors.text,
     fontSize: type.body,
-    fontWeight: '500',
+    fontWeight: weight.semibold,
   },
   rowBtnMeta: {
     color: colors.muted,
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: type.meta,
+    marginTop: spacing.xxs,
   },
   dangerRow: { marginTop: spacing.md },
   dangerText: {
     color: colors.danger,
     fontSize: type.body,
-    fontWeight: '600',
+    fontWeight: weight.semibold,
   },
 });

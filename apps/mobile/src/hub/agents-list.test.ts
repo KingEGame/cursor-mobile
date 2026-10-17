@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agentRowMeta, agentsSyncHint, countWaiting, cursorProblem, filterAgents } from './agents-list';
+import { agentRowMeta, agentsSyncHint, countWaiting, countWorking, cursorProblem, filterActive, filterAgents } from './agents-list';
 import type { AgentsChatRow, AgentsResponse } from './types';
 
 function chat(partial: Partial<AgentsChatRow> & Pick<AgentsChatRow, 'title'>): AgentsChatRow {
@@ -91,5 +91,24 @@ describe('cursorProblem', () => {
     assert.equal(cursorProblem({ ...res, alerts: [notice] }), null);
     assert.equal(cursorProblem(res), null);
     assert.equal(cursorProblem(null), null);
+  });
+});
+
+describe('countWorking / filterActive', () => {
+  const live: AgentsResponse = {
+    ...res,
+    projects: [
+      { ...res.projects[0]!, chats: [chat({ title: 'a', status: 'working' }), chat({ title: 'b' })] },
+      { ...res.projects[0]!, projectId: 'workspace:z', chats: [chat({ title: 'c' })] },
+    ],
+  };
+  it('counts running agents only', () => {
+    assert.equal(countWorking(live), 1);
+    assert.equal(countWorking(null), 0);
+  });
+  it('keeps only non-idle sessions and drops empty projects', () => {
+    const only = filterActive(live);
+    assert.equal(only.projects.length, 1);
+    assert.deepEqual(only.projects[0]!.chats.map((c) => c.title), ['a']);
   });
 });

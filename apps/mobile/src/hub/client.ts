@@ -1,4 +1,5 @@
 import { createIdempotencyKey } from './idempotency';
+import { describeSendFailure, sendFailureText } from './send-errors';
 import type { AppLatestResponse } from './app-update';
 import {
   HubApiError,
@@ -288,6 +289,32 @@ export class HubClient {
    * POST /v1/agents/chats/:composerId/messages — the Hub opens that chat on the PC
    * (sidebar click, verified switch) and types + sends `text` into it.
    */
+  /** GET /v1/agents/chats/:composerId/draft — the PC composer text (only while that chat is open there). */
+  async getAgentDraft(
+    composerId: string,
+  ): Promise<{ composerId: string; open: boolean; text: string | null; hasAttachments: boolean }> {
+    return this.request('GET', `/v1/agents/chats/${encodeURIComponent(composerId)}/draft`, { auth: true });
+  }
+
+  /** PUT /v1/agents/chats/:composerId/draft — mirror the phone text into the PC composer. */
+  async putAgentDraft(
+    composerId: string,
+    text: string,
+  ): Promise<{ composerId: string; ok: boolean; open: boolean; text: string | null; hasAttachments: boolean }> {
+    return this.request('PUT', `/v1/agents/chats/${encodeURIComponent(composerId)}/draft`, {
+      auth: true,
+      body: { text },
+    });
+  }
+
+  /** POST /v1/agents/chats/:composerId/open — raise Cursor and show this chat on the PC. */
+  async openAgentChatOnPc(composerId: string): Promise<{ ok: true; composerId: string }> {
+    return this.request('POST', `/v1/agents/chats/${encodeURIComponent(composerId)}/open`, {
+      auth: true,
+      body: {},
+    });
+  }
+
   async sendToAgentChat(
     composerId: string,
     text: string,
@@ -639,7 +666,7 @@ export function formatSenderError(err: HubApiError): string {
     case 'VALIDATION_ERROR':
       return `Sender failed: ${err.message}`;
     default:
-      return `${err.code}: ${err.message}`;
+      return sendFailureText(err.code, err.status, err.message);
   }
 }
 
@@ -683,9 +710,5 @@ export function formatApprovalError(err: HubApiError): string {
 
 /** Network / CDP-down failures may be queued; selector stale must not. */
 export function shouldQueueSenderFailure(err: HubApiError): boolean {
-  return (
-    err.code === 'NETWORK_ERROR' ||
-    err.code === 'CDP_UNAVAILABLE' ||
-    err.code === 'CURSOR_DOWN'
-  );
+  return describeSendFailure(err.code, err.status).queueable;
 }

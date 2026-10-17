@@ -49,7 +49,7 @@ import {
   drainedSessionIdFromHealth,
 } from '../queue/session-create-queue';
 import { useAppSession } from '../session/AppSessionContext';
-import { colors, spacing } from '../theme';
+import { colors, spacing, type, weight, lineHeight } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewSession'>;
 
@@ -578,13 +578,13 @@ export function NewSessionScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xl },
-  title: { color: colors.text, fontSize: 22, fontWeight: '700' },
-  subtitle: { color: colors.text, fontSize: 16, fontWeight: '600' },
-  path: { color: colors.muted, fontSize: 12, fontFamily: 'monospace' },
-  label: { color: colors.text, fontSize: 14, fontWeight: '600', marginTop: spacing.sm },
-  body: { color: colors.muted, fontSize: 14, lineHeight: 20 },
-  warn: { color: colors.warn, fontSize: 13, lineHeight: 18 },
-  error: { color: colors.danger, fontSize: 13 },
+  title: { color: colors.text, fontSize: type.sub, fontWeight: weight.semibold },
+  subtitle: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
+  path: { color: colors.muted, fontSize: type.meta, fontFamily: 'monospace' },
+  label: { color: colors.text, fontSize: type.meta, fontWeight: weight.semibold, marginTop: spacing.sm },
+  body: { color: colors.muted, fontSize: type.meta, lineHeight: lineHeight.body },
+  warn: { color: colors.warn, fontSize: type.meta, lineHeight: lineHeight.meta },
+  error: { color: colors.danger, fontSize: type.meta },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   chip: {
     borderWidth: 1,
@@ -596,8 +596,8 @@ const styles = StyleSheet.create({
   },
   chipSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
   chipDisabled: { opacity: 0.4 },
-  chipText: { color: colors.text, fontSize: 13 },
-  chipTextSelected: { color: colors.accent, fontWeight: '700' },
+  chipText: { color: colors.text, fontSize: type.meta },
+  chipTextSelected: { color: colors.accent, fontWeight: weight.semibold },
   attachChip: {
     borderRadius: 8,
     backgroundColor: colors.border,
@@ -623,7 +623,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonDisabled: { backgroundColor: colors.border },
-  buttonText: { color: colors.accentText, fontWeight: '700', fontSize: 16 },
+  buttonText: { color: colors.accentText, fontWeight: weight.semibold, fontSize: type.body },
   secondaryButton: {
     flex: 1,
     borderRadius: 8,
@@ -633,11 +633,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.surface,
   },
-  secondaryButtonText: { color: colors.text, fontWeight: '600' },
+  secondaryButtonText: { color: colors.text, fontWeight: weight.semibold },
   linkBtn: { alignSelf: 'flex-start' },
   link: {
     color: colors.muted,
     textDecorationLine: 'underline',
-    fontSize: 13,
+    fontSize: type.meta,
   },
 });

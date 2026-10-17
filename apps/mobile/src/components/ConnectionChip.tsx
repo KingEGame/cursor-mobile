@@ -5,7 +5,7 @@ import {
   type ConnectionChipTone,
 } from '../hub/chats-home';
 import type { CompanionConnectionState } from '../hub/connection-state';
-import { colors, radii, spacing, type } from '../theme';
+import { colors, radii, spacing, type, weight } from '../theme';
 
 interface Props {
   state: CompanionConnectionState;
@@ -47,9 +47,9 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: spacing.xs,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    paddingVertical: spacing.xxs,
     borderRadius: radii.pill,
     backgroundColor: colors.surfaceMuted,
   },
@@ -61,6 +61,6 @@ const styles = StyleSheet.create({
   label: {
     color: colors.muted,
     fontSize: type.chip,
-    fontWeight: '500',
+    fontWeight: weight.semibold,
   },
 });

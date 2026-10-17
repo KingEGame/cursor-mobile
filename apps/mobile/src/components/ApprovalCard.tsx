@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   approvalCardShowsActions,
   normalizeApprovalForCard,
 } from '../hub/approval-fallback';
 import type { PendingApproval } from '../hub/types';
-import { colors, spacing } from '../theme';
+import { colors, spacing, type, weight, lineHeight } from '../theme';
 
 interface Props {
   approval: PendingApproval;
@@ -14,7 +14,41 @@ interface Props {
   onDeny: (approvalId: string) => void;
 }
 
+/** How long "Tool denied · Undo" stays before the deny is sent to the PC. */
+export const DENY_UNDO_MS = 3_000;
+
 export function ApprovalCard({ approval, busy, onApprove, onDeny }: Props) {
+  const [denying, setDenying] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flush = useRef<(() => void) | null>(null);
+
+  const startDeny = useCallback(
+    (id: string) => {
+      setDenying(true);
+      const send = () => {
+        timer.current = null;
+        flush.current = null;
+        onDeny(id);
+      };
+      flush.current = send;
+      timer.current = setTimeout(send, DENY_UNDO_MS);
+    },
+    [onDeny],
+  );
+  const undoDeny = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    flush.current = null;
+    setDenying(false);
+  };
+  // Leaving the screen inside the undo window must not drop the operator's decision.
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+      flush.current?.();
+    },
+    [],
+  );
   const normalized = normalizeApprovalForCard(approval) ?? approval;
   const pending = approvalCardShowsActions(normalized);
   const argsText =
@@ -46,12 +80,25 @@ export function ApprovalCard({ approval, busy, onApprove, onDeny }: Props) {
         </Text>
       ) : null}
       <Text style={styles.status}>Status: {normalized.status}</Text>
-      {pending ? (
+      {pending && denying ? (
+        <View style={styles.undoRow} accessibilityLiveRegion="polite">
+          <Text style={styles.undoText}>Tool denied</Text>
+          <Pressable
+            onPress={undoDeny}
+            style={styles.undoBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Undo deny"
+            testID="approval-undo"
+          >
+            <Text style={styles.undoBtnText}>Undo</Text>
+          </Pressable>
+        </View>
+      ) : pending ? (
         <View style={styles.actions}>
           <Pressable
             style={[styles.btn, styles.deny]}
             disabled={busy}
-            onPress={() => onDeny(normalized.approvalId)}
+            onPress={() => startDeny(normalized.approvalId)}
             accessibilityRole="button"
             accessibilityLabel="Deny tool"
             testID="approval-deny"
@@ -60,7 +107,7 @@ export function ApprovalCard({ approval, busy, onApprove, onDeny }: Props) {
             {busy ? (
               <ActivityIndicator color={colors.text} />
             ) : (
-              <Text style={styles.denyText}>Deny</Text>
+              <Text style={styles.denyText}>Deny tool</Text>
             )}
           </Pressable>
           <Pressable
@@ -75,7 +122,7 @@ export function ApprovalCard({ approval, busy, onApprove, onDeny }: Props) {
             {busy ? (
               <ActivityIndicator color={colors.accentText} />
             ) : (
-              <Text style={styles.approveText}>Approve</Text>
+              <Text style={styles.approveText}>Approve tool</Text>
             )}
           </Pressable>
         </View>
@@ -97,32 +144,38 @@ const styles = StyleSheet.create({
   },
   badge: {
     color: colors.warn,
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: type.meta,
+    fontWeight: weight.semibold,
     textTransform: 'uppercase',
   },
-  tool: { color: colors.text, fontSize: 16, fontWeight: '700' },
-  server: { color: colors.muted, fontSize: 12 },
-  summary: { color: colors.text, fontSize: 14, lineHeight: 20 },
+  tool: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
+  server: { color: colors.muted, fontSize: type.meta },
+  summary: { color: colors.text, fontSize: type.meta, lineHeight: lineHeight.body },
   args: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: type.meta,
     fontFamily: 'monospace',
     backgroundColor: colors.bg,
     padding: spacing.sm,
     borderRadius: 4,
   },
-  status: { color: colors.muted, fontSize: 12 },
+  status: { color: colors.muted, fontSize: type.meta },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   btn: {
     flex: 1,
+    minHeight: 48,
+    justifyContent: 'center',
     borderRadius: 8,
     paddingVertical: spacing.sm,
     alignItems: 'center',
   },
   approve: { backgroundColor: colors.accent },
   deny: { backgroundColor: colors.border },
-  approveText: { color: colors.accentText, fontWeight: '700' },
-  denyText: { color: colors.text, fontWeight: '700' },
-  hint: { color: colors.muted, fontSize: 11, marginTop: spacing.xs },
+  approveText: { color: colors.accentText, fontWeight: weight.semibold },
+  denyText: { color: colors.text, fontWeight: weight.semibold },
+  undoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48, marginTop: spacing.sm },
+  undoText: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
+  undoBtn: { minHeight: 48, minWidth: 48, paddingHorizontal: spacing.md, alignItems: 'center', justifyContent: 'center' },
+  undoBtnText: { color: colors.accent, fontSize: type.body, fontWeight: weight.semibold },
+  hint: { color: colors.muted, fontSize: type.meta, marginTop: spacing.xs },
 });

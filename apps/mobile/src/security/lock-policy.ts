@@ -2,7 +2,8 @@
  * App-lock decisions (pure — no native calls, so it is unit-testable).
  *
  * lockSend is paused (always off): operators disliked fingerprint/PIN on every
- * send. lockOpen remains optional via Account → Security.
+ * send. lockOpen remains optional via Account → Security. lockApprove (approving a tool
+ * that runs on the PC) is on by default and only prompts when the phone can authenticate.
  */
 
 export interface LockSettings {
@@ -10,10 +11,12 @@ export interface LockSettings {
   lockSend: boolean;
   /** Fingerprint / PIN when the app is opened or comes back from background (default off). */
   lockOpen: boolean;
+  /** Fingerprint / PIN before the phone approves a tool on the PC (default on; UI-SPEC F6). */
+  lockApprove: boolean;
 }
 
 /** lockSend stayed true historically; keep the field but default / force off for now. */
-export const DEFAULT_LOCK_SETTINGS: LockSettings = { lockSend: false, lockOpen: false };
+export const DEFAULT_LOCK_SETTINGS: LockSettings = { lockSend: false, lockOpen: false, lockApprove: true };
 
 /** Feature pause: unlock-to-send is disabled until re-enabled deliberately. */
 export const LOCK_SEND_ENABLED = false;
@@ -55,6 +58,7 @@ export function parseLockSettings(raw: string | null): LockSettings {
           : DEFAULT_LOCK_SETTINGS.lockSend
         : false,
       lockOpen: typeof v.lockOpen === 'boolean' ? v.lockOpen : DEFAULT_LOCK_SETTINGS.lockOpen,
+      lockApprove: typeof v.lockApprove === 'boolean' ? v.lockApprove : DEFAULT_LOCK_SETTINGS.lockApprove,
     };
   } catch {
     return { ...DEFAULT_LOCK_SETTINGS };

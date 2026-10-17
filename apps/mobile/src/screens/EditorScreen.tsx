@@ -26,7 +26,7 @@ import {
   rootDisplayName,
 } from '../picker/helpers';
 import { useAppSession } from '../session/AppSessionContext';
-import { colors, spacing } from '../theme';
+import { colors, spacing, type, weight, lineHeight } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Editor'>;
 
@@ -257,11 +257,11 @@ export function EditorScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg, padding: spacing.md, gap: spacing.sm },
   header: { gap: spacing.sm },
-  title: { color: colors.text, fontSize: 22, fontWeight: '700' },
-  hint: { color: colors.muted, fontSize: 13, lineHeight: 18 },
-  body: { color: colors.muted, fontSize: 14, lineHeight: 20 },
-  warn: { color: colors.warn, fontSize: 12, lineHeight: 16 },
-  error: { color: colors.danger, fontSize: 13 },
+  title: { color: colors.text, fontSize: type.sub, fontWeight: weight.semibold },
+  hint: { color: colors.muted, fontSize: type.meta, lineHeight: lineHeight.meta },
+  body: { color: colors.muted, fontSize: type.meta, lineHeight: lineHeight.body },
+  warn: { color: colors.warn, fontSize: type.meta, lineHeight: lineHeight.meta },
+  error: { color: colors.danger, fontSize: type.meta },
   search: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -291,15 +291,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  fileRowActive: { backgroundColor: '#1a2e24' },
-  filePath: { color: colors.text, fontFamily: 'monospace', fontSize: 12 },
-  meta: { color: colors.muted, fontSize: 11 },
-  crumbs: { color: colors.accent, fontSize: 12, fontWeight: '600' },
+  fileRowActive: { backgroundColor: colors.accentSoft },
+  filePath: { color: colors.text, fontFamily: 'monospace', fontSize: type.meta },
+  meta: { color: colors.muted, fontSize: type.meta },
+  crumbs: { color: colors.accent, fontSize: type.meta, fontWeight: weight.semibold },
   previewText: {
     color: colors.text,
     fontFamily: 'monospace',
-    fontSize: 11,
-    lineHeight: 16,
+    fontSize: type.meta,
+    lineHeight: lineHeight.meta,
   },
   button: {
     backgroundColor: colors.accent,
@@ -307,7 +307,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
-  buttonText: { color: colors.accentText, fontWeight: '700', fontSize: 16 },
+  buttonText: { color: colors.accentText, fontWeight: weight.semibold, fontSize: type.body },
   secondaryButton: {
     borderRadius: 8,
     borderWidth: 1,
@@ -317,5 +317,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.bg,
   },
-  secondaryButtonText: { color: colors.text, fontWeight: '600', fontSize: 12, textAlign: 'center' },
+  secondaryButtonText: { color: colors.text, fontWeight: weight.semibold, fontSize: type.meta, textAlign: 'center' },
 });

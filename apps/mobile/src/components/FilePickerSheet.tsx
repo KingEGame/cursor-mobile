@@ -22,7 +22,7 @@ import {
   rootQueryForHub,
   toggleAttachment,
 } from '../picker/helpers';
-import { colors, spacing } from '../theme';
+import { colors, spacing, type, weight, lineHeight } from '../theme';
 
 export interface FilePickerSheetProps {
   visible: boolean;
@@ -368,11 +368,11 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xl,
     gap: spacing.sm,
   },
-  title: { color: colors.text, fontSize: 22, fontWeight: '700' },
-  hint: { color: colors.muted, fontSize: 13, lineHeight: 18 },
-  body: { color: colors.muted, fontSize: 14, lineHeight: 20 },
-  warn: { color: colors.warn, fontSize: 13, lineHeight: 18 },
-  error: { color: colors.danger, fontSize: 13 },
+  title: { color: colors.text, fontSize: type.sub, fontWeight: weight.semibold },
+  hint: { color: colors.muted, fontSize: type.meta, lineHeight: lineHeight.meta },
+  body: { color: colors.muted, fontSize: type.meta, lineHeight: lineHeight.body },
+  warn: { color: colors.warn, fontSize: type.meta, lineHeight: lineHeight.meta },
+  error: { color: colors.danger, fontSize: type.meta },
   rootChips: { gap: spacing.sm, paddingVertical: spacing.xs },
   rootChip: {
     borderWidth: 1,
@@ -383,14 +383,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     marginRight: spacing.sm,
   },
-  rootChipActive: { borderColor: colors.accent, backgroundColor: '#1a2e24' },
-  rootChipText: { color: colors.text, fontSize: 13 },
-  rootChipTextActive: { color: colors.accent, fontWeight: '700', fontSize: 13 },
+  rootChipActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  rootChipText: { color: colors.text, fontSize: type.meta },
+  rootChipTextActive: { color: colors.accent, fontWeight: weight.semibold, fontSize: type.meta },
   crumbs: { alignItems: 'center', paddingVertical: spacing.xs },
   crumbRow: { flexDirection: 'row', alignItems: 'center' },
-  crumbSep: { color: colors.muted, fontSize: 12 },
-  crumbLink: { color: colors.accent, fontSize: 13, fontWeight: '600' },
-  crumbActive: { color: colors.text, fontSize: 13, fontWeight: '700' },
+  crumbSep: { color: colors.muted, fontSize: type.meta },
+  crumbLink: { color: colors.accent, fontSize: type.meta, fontWeight: weight.semibold },
+  crumbActive: { color: colors.text, fontSize: type.meta, fontWeight: weight.semibold },
   search: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -409,17 +409,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  fileRowSelected: { backgroundColor: '#1a2e24' },
-  fileMain: { flex: 1, gap: 2 },
-  filePath: { color: colors.text, fontFamily: 'monospace', fontSize: 13 },
-  meta: { color: colors.muted, fontSize: 12 },
+  fileRowSelected: { backgroundColor: colors.accentSoft },
+  fileMain: { flex: 1, gap: spacing.xxs },
+  filePath: { color: colors.text, fontFamily: 'monospace', fontSize: type.meta },
+  meta: { color: colors.muted, fontSize: type.meta },
   button: {
     backgroundColor: colors.accent,
     borderRadius: 8,
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
-  buttonText: { color: colors.accentText, fontWeight: '700', fontSize: 16 },
+  buttonText: { color: colors.accentText, fontWeight: weight.semibold, fontSize: type.body },
   secondaryButton: {
     borderRadius: 8,
     borderWidth: 1,
@@ -428,5 +428,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.surface,
   },
-  secondaryButtonText: { color: colors.text, fontWeight: '600' },
+  secondaryButtonText: { color: colors.text, fontWeight: weight.semibold },
 });

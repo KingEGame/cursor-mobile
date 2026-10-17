@@ -24,7 +24,7 @@ import {
   formatTailscaleSetupSteps,
   shouldShowTailscaleGuide,
 } from '../hub/tailscale-guide';
-import { colors, spacing } from '../theme';
+import { colors, spacing, type, weight, lineHeight } from '../theme';
 import type { RootNav } from '../navigation/types';
 import { deriveHealthLevel, useAppSession } from '../session/AppSessionContext';
 import { HealthDot } from '../components/HealthDot';
@@ -361,11 +361,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  title: { color: colors.text, fontSize: 24, fontWeight: '700' },
-  versionLabel: { color: colors.muted, fontSize: 12 },
-  body: { color: colors.muted, fontSize: 14, lineHeight: 20 },
-  meta: { color: colors.muted, fontSize: 12 },
-  warn: { color: colors.warn, fontSize: 14 },
+  title: { color: colors.text, fontSize: type.title, fontWeight: weight.semibold },
+  versionLabel: { color: colors.muted, fontSize: type.meta },
+  body: { color: colors.muted, fontSize: type.meta, lineHeight: lineHeight.body },
+  meta: { color: colors.muted, fontSize: type.meta },
+  warn: { color: colors.warn, fontSize: type.meta },
   error: { color: colors.danger },
   guideBox: {
     marginTop: spacing.sm,
@@ -376,8 +376,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     gap: spacing.xs,
   },
-  guideTitle: { color: colors.text, fontSize: 15, fontWeight: '600' },
-  guideSteps: { color: colors.text, fontSize: 13, lineHeight: 20 },
+  guideTitle: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
+  guideSteps: { color: colors.text, fontSize: type.meta, lineHeight: lineHeight.body },
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -387,9 +387,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.sm,
   },
-  row: { gap: 2 },
-  rowLabel: { color: colors.muted, fontSize: 12 },
-  rowValue: { color: colors.text, fontSize: 15 },
+  row: { gap: spacing.xxs },
+  rowLabel: { color: colors.muted, fontSize: type.meta },
+  rowValue: { color: colors.text, fontSize: type.body },
   good: { color: colors.healthy },
   bad: { color: colors.danger },
   button: {
@@ -400,7 +400,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: colors.accentText, fontWeight: '700', fontSize: 16 },
+  buttonText: { color: colors.accentText, fontWeight: weight.semibold, fontSize: type.body },
   secondary: {
     marginTop: spacing.sm,
     borderColor: colors.border,
@@ -419,7 +419,7 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     gap: spacing.sm,
   },
-  emptyTitle: { color: colors.text, fontSize: 16, fontWeight: '600' },
+  emptyTitle: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
   link: {
     color: colors.muted,
     textAlign: 'center',

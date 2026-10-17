@@ -13,7 +13,7 @@ import { FileText, Plug, Slash, X } from 'lucide-react-native';
 import type { HubClient } from '../hub/client';
 import { isPluginOption, usableOption } from '../hub/composer';
 import type { MentionOption, MentionRef } from '../hub/types';
-import { colors, radii, spacing } from '../theme';
+import { colors, radii, spacing, type, weight } from '../theme';
 
 export type PickerKind = 'files' | 'skills' | 'plugins';
 
@@ -157,7 +157,7 @@ const styles = StyleSheet.create({
     minHeight: '50%',
   },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
-  title: { color: colors.text, fontSize: 18, fontWeight: '700' },
+  title: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
   search: {
     backgroundColor: colors.surface,
     borderRadius: radii.sm,
@@ -166,7 +166,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     minHeight: 44,
     color: colors.text,
-    fontSize: 16,
+    fontSize: type.body,
     marginBottom: spacing.sm,
   },
   error: { color: colors.danger, marginBottom: spacing.sm },
@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 52, paddingHorizontal: spacing.xs },
   pressed: { backgroundColor: colors.surfaceMuted },
   rowBody: { flex: 1, minWidth: 0 },
-  label: { color: colors.text, fontSize: 15 },
-  detail: { color: colors.muted, fontSize: 12 },
-  hint: { color: colors.accent, fontSize: 12 },
+  label: { color: colors.text, fontSize: type.body },
+  detail: { color: colors.muted, fontSize: type.meta },
+  hint: { color: colors.accent, fontSize: type.meta },
 });

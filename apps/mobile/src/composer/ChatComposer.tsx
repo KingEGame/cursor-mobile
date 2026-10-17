@@ -13,6 +13,7 @@ import {
 import {
   ArrowUp,
   Camera,
+  ChevronDown,
   ChevronRight,
   FileText,
   Image as ImageIcon,
@@ -26,7 +27,7 @@ import {
 import type { HubClient } from '../hub/client';
 import { MODES, canSend, composerPayload, mentionChipLabel, modeInfo, sameMention } from '../hub/composer';
 import type { AgentMode, ComposerOptions, MentionRef, PhonePhoto, WorkspaceModel } from '../hub/types';
-import { colors, radii, spacing } from '../theme';
+import { colors, radii, spacing, type, weight } from '../theme';
 import { MentionPicker, type PickerKind } from './MentionPicker';
 import { pickPhoto } from './photos';
 
@@ -53,8 +54,12 @@ export function ChatComposer(props: {
   onCancelEdit?: () => void;
   onSubmit: (payload: ComposerSubmit) => Promise<boolean>;
   onStop?: () => void;
+  /** Text pushed in from outside (the PC composer changed); `nonce` makes repeats apply. */
+  externalText?: { text: string; nonce: number } | null;
+  /** Reports the typed text and whether chips/photos are attached (plain-text sync pauses then). */
+  onDraftChange?: (text: string, hasAttachments: boolean) => void;
 }) {
-  const { client, composerId, running, busy, editingText, onCancelEdit, onSubmit, onStop } = props;
+  const { client, composerId, running, busy, editingText, onCancelEdit, onSubmit, onStop, externalText, onDraftChange } = props;
   const [text, setText] = useState('');
   const [mode, setMode] = useState<AgentMode | null>(null);
   const [model, setModel] = useState<string | null>(null);
@@ -69,6 +74,16 @@ export function ChatComposer(props: {
   useEffect(() => {
     if (editingText != null) setText(editingText);
   }, [editingText]);
+
+  useEffect(() => {
+    if (externalText) setText(externalText.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalText?.nonce]);
+
+  useEffect(() => {
+    onDraftChange?.(text, mentions.length > 0 || images.length > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, mentions.length, images.length]);
 
   useEffect(() => {
     if (sheet !== 'model' || models || !client) return;
@@ -111,12 +126,17 @@ export function ChatComposer(props: {
   const hasChips = !editing && (mode || mentions.length > 0 || images.length > 0);
 
   return (
-    <View style={[styles.wrap, { paddingBottom: spacing.sm + props.bottomInset }]}>
+    <View style={[styles.wrap, { paddingBottom: spacing.xxs + props.bottomInset }]}>
       {editing ? (
         <View style={styles.editBar}>
           <Pencil size={14} color={colors.warn} />
           <Text style={styles.editText}>Editing an earlier message — Cursor re-runs from there</Text>
-          <Pressable onPress={onCancelEdit} hitSlop={8} accessibilityLabel="Cancel edit">
+          <Pressable
+            onPress={onCancelEdit}
+            style={styles.touch48}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel edit"
+          >
             <X size={18} color={colors.muted} />
           </Pressable>
         </View>
@@ -172,6 +192,21 @@ export function ChatComposer(props: {
           accessibilityLabel="Message"
           testID="chat-input"
         />
+        {!editing ? (
+          <Pressable
+            style={styles.modelChip}
+            hitSlop={{ top: 8, bottom: 8 }}
+            onPress={() => setSheet('model')}
+            accessibilityRole="button"
+            accessibilityLabel={`Select model. Current: ${model ?? 'as on PC'}`}
+            testID="composer-model"
+          >
+            <Text style={styles.modelText} numberOfLines={1}>
+              {model ?? 'PC model'}
+            </Text>
+            <ChevronDown size={14} color={colors.muted} />
+          </Pressable>
+        ) : null}
         {showStop ? (
           <Pressable
             onPress={onStop}
@@ -188,7 +223,8 @@ export function ChatComposer(props: {
             disabled={!canSend(text, busy)}
             style={[styles.send, !canSend(text, busy) && styles.sendDisabled]}
             accessibilityRole="button"
-            accessibilityLabel={editing ? 'Save and resend' : 'Send message'}
+            accessibilityState={{ disabled: !canSend(text, busy), busy }}
+            accessibilityLabel={busy ? 'Sending' : editing ? 'Save and resend' : 'Send message'}
             testID="chat-send"
           >
             {busy ? (
@@ -199,13 +235,6 @@ export function ChatComposer(props: {
           </Pressable>
         )}
       </View>
-
-      {!editing ? (
-        <Pressable style={styles.modelPill} onPress={() => setSheet('model')} accessibilityLabel="Select model">
-          <Text style={styles.modelText}>Model {model ?? 'as on PC'}</Text>
-          <ChevronRight size={14} color={colors.muted} />
-        </Pressable>
-      ) : null}
 
       <Modal visible={sheet === 'plus'} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
         <Pressable style={styles.backdrop} onPress={() => setSheet(null)}>
@@ -222,6 +251,9 @@ export function ChatComposer(props: {
                   <Pressable
                     key={m.mode}
                     style={[styles.modeCard, { backgroundColor: m.color }, mode === m.mode && styles.modeSelected]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: mode === m.mode }}
+                    accessibilityLabel={`${m.mode} mode. ${m.subtitle}`}
                     onPress={() => {
                       setMode(mode === m.mode ? null : m.mode);
                       setSheet(null);
@@ -308,7 +340,7 @@ function SheetRow(props: {
     >
       {Icon ? <Icon size={20} color={colors.text} strokeWidth={1.75} /> : null}
       <View style={{ flex: 1 }}>
-        <Text style={[styles.sheetRowLabel, props.selected && { color: colors.accent, fontWeight: '700' }]}>
+        <Text style={[styles.sheetRowLabel, props.selected && { color: colors.accent, fontWeight: weight.semibold }]}>
           {props.label}
         </Text>
         {props.sub ? <Text style={styles.sheetRowSub}>{props.sub}</Text> : null}
@@ -327,19 +359,19 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   editBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  editText: { flex: 1, color: colors.warn, fontSize: 12 },
-  chips: { gap: spacing.xs, alignItems: 'center', paddingVertical: 2 },
+  editText: { flex: 1, color: colors.warn, fontSize: type.meta },
+  chips: { gap: spacing.xs, alignItems: 'center', paddingVertical: spacing.xxs },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: spacing.xxs,
     paddingHorizontal: spacing.sm,
     minHeight: 30,
     borderRadius: radii.pill,
     backgroundColor: colors.surfaceMuted,
     maxWidth: 220,
   },
-  chipText: { color: colors.text, fontSize: 13, flexShrink: 1 },
+  chipText: { color: colors.text, fontSize: type.meta, flexShrink: 1 },
   thumbWrap: { width: 44, height: 44 },
   thumb: { width: 44, height: 44, borderRadius: 8 },
   thumbX: {
@@ -355,38 +387,38 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
   plus: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#f7f8fa',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: '#c5c9d0',
+    borderColor: colors.borderStrong,
     alignItems: 'center',
     justifyContent: 'center',
   },
   input: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 48,
     maxHeight: 140,
     borderRadius: radii.md,
     backgroundColor: colors.surfaceMuted,
     paddingHorizontal: spacing.md,
-    paddingVertical: 10,
+    paddingVertical: spacing.sm,
     color: colors.text,
-    fontSize: 16,
+    fontSize: type.body,
   },
   send: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stop: { backgroundColor: colors.danger },
   sendDisabled: { backgroundColor: colors.border },
-  modelPill: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 2, minHeight: 24 },
-  modelText: { color: colors.muted, fontSize: 12 },
+  modelChip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: spacing.xxs, minHeight: 32, maxWidth: 96, paddingHorizontal: spacing.xs },
+  modelText: { color: colors.muted, fontSize: type.meta },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: colors.bg,
@@ -398,15 +430,16 @@ const styles = StyleSheet.create({
   },
   sheetScroll: { maxHeight: 480 },
   sheetScrollContent: { gap: spacing.xs, paddingBottom: spacing.sm },
-  sheetLabel: { color: colors.muted, fontSize: 12, fontWeight: '600', marginTop: spacing.xs },
+  sheetLabel: { color: colors.muted, fontSize: type.meta, fontWeight: weight.semibold, marginTop: spacing.xs },
   modes: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm },
   modeCard: { width: '48%', borderRadius: radii.sm, padding: spacing.sm, minHeight: 64 },
   modeSelected: { borderWidth: 2, borderColor: colors.text },
-  modeName: { color: colors.text, fontWeight: '700', fontSize: 15 },
-  modeSub: { color: colors.text, fontSize: 12, opacity: 0.75 },
+  modeName: { color: colors.text, fontWeight: weight.semibold, fontSize: type.body },
+  modeSub: { color: colors.text, fontSize: type.meta, opacity: 0.75 },
   sheetRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 52, paddingHorizontal: spacing.xs },
-  sheetRowLabel: { color: colors.text, fontSize: 16 },
-  sheetRowSub: { color: colors.muted, fontSize: 12 },
+  sheetRowLabel: { color: colors.text, fontSize: type.body },
+  sheetRowSub: { color: colors.muted, fontSize: type.meta },
   pressed: { backgroundColor: colors.surfaceMuted },
+  touch48: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   disabled: { opacity: 0.4 },
 });

@@ -31,7 +31,7 @@ import {
   savePairingSuccess,
 } from '../storage/pairing';
 import { CalmEnter } from '../motion/calmEnter';
-import { colors, radii, spacing, type } from '../theme';
+import { colors, radii, spacing, type, weight, lineHeight } from '../theme';
 import {
   isPairTokenInject,
   parsePairDeepLink,
@@ -326,7 +326,7 @@ export function PairScreen({ navigation }: Props) {
   return (
     <KeyboardAvoidingView
       style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
       keyboardVerticalOffset={insets.top}
     >
       <ScrollView
@@ -506,13 +506,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: spacing.xs,
     minHeight: 56,
     borderRadius: radii.pill,
     backgroundColor: colors.accent,
     marginTop: spacing.sm,
   },
-  scanText: { color: colors.accentText, fontSize: 18, fontWeight: '600' },
+  scanText: { color: colors.accentText, fontSize: type.body, fontWeight: weight.semibold },
   root: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -525,19 +525,19 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: type.title,
-    fontWeight: '600',
+    fontWeight: weight.semibold,
     marginBottom: spacing.xs,
   },
   body: {
     color: colors.muted,
     fontSize: type.body,
-    lineHeight: 24,
+    lineHeight: lineHeight.sub,
     marginBottom: spacing.sm,
   },
   bodyTight: {
     color: colors.muted,
     fontSize: type.meta,
-    lineHeight: 20,
+    lineHeight: lineHeight.body,
   },
   status: {
     color: colors.accent,
@@ -556,7 +556,7 @@ const styles = StyleSheet.create({
   disclosureText: {
     color: colors.text,
     fontSize: type.body,
-    fontWeight: '600',
+    fontWeight: weight.semibold,
   },
   manualBox: {
     gap: spacing.sm,
@@ -573,7 +573,7 @@ const styles = StyleSheet.create({
   guideSteps: {
     color: colors.text,
     fontSize: type.meta,
-    lineHeight: 20,
+    lineHeight: lineHeight.body,
   },
   label: {
     color: colors.muted,
@@ -583,7 +583,7 @@ const styles = StyleSheet.create({
   hint: {
     color: colors.muted,
     fontSize: type.meta,
-    lineHeight: 18,
+    lineHeight: lineHeight.meta,
   },
   input: {
     backgroundColor: colors.surface,
@@ -610,7 +610,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: colors.accentText,
-    fontWeight: '600',
+    fontWeight: weight.semibold,
     fontSize: type.body,
   },
   link: {
@@ -626,7 +626,7 @@ const styles = StyleSheet.create({
     color: colors.danger,
     marginTop: spacing.sm,
     fontSize: type.meta,
-    lineHeight: 20,
+    lineHeight: lineHeight.body,
   },
   pressed: {
     opacity: 0.85,

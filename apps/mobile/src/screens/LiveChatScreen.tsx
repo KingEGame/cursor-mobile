@@ -1,3 +1,6 @@
+import { useHeaderHeight } from '@react-navigation/elements';
+import { formatMessageTime } from '../chat/format';
+import { loadLockSettings, unlock } from '../security/app-lock';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -44,12 +47,13 @@ import {
 import { HubWebSocket, type HubWsConnectionState } from '../hub/ws';
 import type { RootStackParamList } from '../navigation/types';
 import { useAppSession } from '../session/AppSessionContext';
-import { colors, radii, spacing, type } from '../theme';
+import { colors, radii, spacing, type, weight, lineHeight } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'LiveChat'>;
 
 export function LiveChatScreen({ navigation, route }: Props) {
   const { sessionId, title: initialTitle, prefill, autosend } = route.params;
+  const headerHeight = useHeaderHeight();
   const session = useAppSession();
   // Stable callbacks only — depending on `session` itself re-creates loaders on every
   // setHealthAndWorkspace and causes an endless refresh / WS reconnect loop.
@@ -475,6 +479,14 @@ export function LiveChatScreen({ navigation, route }: Props) {
     setError(null);
     const idempotencyKey = createIdempotencyKey(`apr-${decision}`);
     try {
+      // Approving lets a tool run on the PC: ask for fingerprint / PIN first (deny never asks).
+      if (decision === 'approve') {
+        const { lockApprove } = await loadLockSettings();
+        if (!(await unlock(lockApprove, 'Unlock to approve tools on your PC'))) {
+          setError('Not approved — unlock was cancelled.');
+          return;
+        }
+      }
       const res = await client().postApproval(
         sessionId,
         { approvalId, decision },
@@ -603,8 +615,8 @@ export function LiveChatScreen({ navigation, route }: Props) {
   return (
     <KeyboardAvoidingView
       style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={88}
+      behavior="padding"
+      keyboardVerticalOffset={headerHeight}
     >
       <View style={styles.header}>
         <View style={styles.headerRow}>
@@ -622,7 +634,9 @@ export function LiveChatScreen({ navigation, route }: Props) {
             .join(' · ')}
         </Text>
         {connectionState !== 'Ready' ? (
-          <Text style={styles.warn}>{connectionStateLabel(connectionState)}</Text>
+          <Text style={styles.warn} accessibilityLiveRegion="polite">
+            {connectionStateLabel(connectionState)}
+          </Text>
         ) : null}
         {degradedReason ? <Text style={styles.warn}>{degradedReason}</Text> : null}
         {senderBlocked && !degradedReason ? (
@@ -638,7 +652,11 @@ export function LiveChatScreen({ navigation, route }: Props) {
         ) : null}
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? (
+        <Text style={styles.error} accessibilityLiveRegion="assertive">
+          {error}
+        </Text>
+      ) : null}
 
       {busy ? (
         <View style={styles.loading}>
@@ -680,8 +698,15 @@ export function LiveChatScreen({ navigation, route }: Props) {
                 styles.bubble,
                 item.role === 'user' ? styles.userBubble : styles.assistantBubble,
               ]}
+              accessible
+              accessibilityLabel={`${item.role === 'user' ? 'You said' : 'Agent said'}: ${item.content}${item.createdAt ? `, ${formatMessageTime(item.createdAt)}` : ''}`}
             >
-              <Text style={styles.bubbleText}>{item.content}</Text>
+              <Text style={styles.bubbleText} selectable>
+                {item.content}
+              </Text>
+              {item.createdAt ? (
+                <Text style={styles.bubbleTime}>{formatMessageTime(item.createdAt)}</Text>
+              ) : null}
               {item.status === 'streaming' ? (
                 <Text style={styles.streaming}>streaming…</Text>
               ) : null}
@@ -748,7 +773,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
     backgroundColor: colors.surface,
-    gap: 2,
+    gap: spacing.xxs,
   },
   headerRow: {
     flexDirection: 'row',
@@ -759,16 +784,16 @@ const styles = StyleSheet.create({
   headerTitle: {
     flex: 1,
     color: colors.text,
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: type.body,
+    fontWeight: weight.semibold,
   },
-  headerMeta: { color: colors.muted, fontSize: 12 },
-  warn: { color: colors.warn, fontSize: 12, marginTop: 4 },
+  headerMeta: { color: colors.muted, fontSize: type.meta },
+  warn: { color: colors.warn, fontSize: type.meta, marginTop: spacing.xxs },
   error: {
     color: colors.danger,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
-    fontSize: 13,
+    fontSize: type.meta,
   },
   list: { flex: 1 },
   // Same flex as the list so the composer stays pinned to the bottom while loading.
@@ -779,7 +804,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.xl,
     fontSize: type.body,
-    lineHeight: 22,
+    lineHeight: lineHeight.body,
   },
   bubble: {
     borderRadius: radii.md,
@@ -797,6 +822,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
   },
-  bubbleText: { color: colors.text, fontSize: 15, lineHeight: 22 },
-  streaming: { color: colors.warn, fontSize: 11, marginTop: 4 },
+  bubbleText: { color: colors.text, fontSize: type.body, lineHeight: lineHeight.body },
+  bubbleTime: { color: colors.muted, fontSize: type.meta, marginTop: spacing.xxs },
+  streaming: { color: colors.warn, fontSize: type.meta, marginTop: spacing.xxs },
 });

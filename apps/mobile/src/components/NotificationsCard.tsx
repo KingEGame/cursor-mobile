@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, Switch, Text, View } from 'react-native';
 import { loadNotifyEnabled, saveNotifyEnabled, syncPcWatch } from '../notifications/pc-watch';
 import { useAppSession } from '../session/AppSessionContext';
-import { colors, radii, spacing } from '../theme';
+import { colors, radii, spacing, type, weight } from '../theme';
 
 const STATUS_COPY: Record<string, string> = {
   running: 'Watching — an ongoing notification shows while this is on.',
@@ -63,9 +63,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     gap: spacing.sm,
   },
-  label: { color: colors.muted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase' },
+  label: { color: colors.muted, fontSize: type.meta, fontWeight: weight.semibold, textTransform: 'uppercase' },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 48 },
   rowBody: { flex: 1 },
-  title: { color: colors.text, fontSize: 16 },
-  meta: { color: colors.muted, fontSize: 12, marginTop: 2 },
+  title: { color: colors.text, fontSize: type.body },
+  meta: { color: colors.muted, fontSize: type.meta, marginTop: spacing.xxs },
 });

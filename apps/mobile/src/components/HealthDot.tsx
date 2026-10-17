@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, spacing } from '../theme';
+import { colors, spacing, type } from '../theme';
 
 export type HealthDotLevel = 'healthy' | 'degraded' | 'down' | 'unknown';
 
@@ -48,6 +48,6 @@ const styles = StyleSheet.create({
   },
   label: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: type.meta,
   },
 });

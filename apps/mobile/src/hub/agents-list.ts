@@ -67,3 +67,25 @@ export function filterAgents(res: AgentsResponse, query: string): AgentsResponse
       .filter((p) => p.chats.length > 0),
   };
 }
+
+/** Chats whose agent is running right now. */
+export function countWorking(res: AgentsResponse | null): number {
+  if (!res) return 0;
+  return res.projects.reduce((n, p) => n + p.chats.filter((c) => c.status === 'working').length, 0);
+}
+
+/** Only the agent sessions that need attention: working, waiting for approval, or errored. */
+export function filterActive(res: AgentsResponse): AgentsResponse {
+  return {
+    ...res,
+    projects: res.projects
+      .map((p) => ({ ...p, chats: p.chats.filter((c) => c.status !== 'idle') }))
+      .filter((p) => p.chats.length > 0),
+  };
+}
+
+/** "20 projects · 33 chats" for the compact Home status row. */
+export function agentsSyncShort(res: AgentsResponse): string {
+  const chats = res.projects.reduce((n, p) => n + p.chats.length, 0);
+  return `${res.projects.length} project${res.projects.length === 1 ? '' : 's'} · ${chats} chat${chats === 1 ? '' : 's'}${res.source === 'sidebar' ? '' : ' (history)'}`;
+}

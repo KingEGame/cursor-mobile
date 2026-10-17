@@ -1,3 +1,4 @@
+import { useHeaderHeight } from '@react-navigation/elements';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,7 +19,7 @@ import { HubApiError, type AgentsProjectRow } from '../hub/types';
 import type { RootStackParamList } from '../navigation/types';
 import { loadLockSettings, unlock } from '../security/app-lock';
 import { useAppSession } from '../session/AppSessionContext';
-import { colors, radii, spacing } from '../theme';
+import { colors, radii, spacing, type, weight } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewAgentChat'>;
 
@@ -27,6 +28,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'NewAgentChat'>;
  * on the PC, proves a fresh chat opened there, then types the first message.
  */
 export function NewAgentChatScreen({ navigation, route }: Props) {
+  const headerHeight = useHeaderHeight();
   const session = useAppSession();
   const insets = useSafeAreaInsets();
   const [projects, setProjects] = useState<AgentsProjectRow[] | null>(null);
@@ -81,7 +83,7 @@ export function NewAgentChatScreen({ navigation, route }: Props) {
   const chosen = projects?.find((p) => p.projectId === projectId);
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.root} behavior="padding" keyboardVerticalOffset={headerHeight}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.label}>Project on your PC</Text>
         {!projects ? <ActivityIndicator color={colors.accent} /> : null}
@@ -122,7 +124,7 @@ export function NewAgentChatScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.md, gap: spacing.xs },
-  label: { color: colors.muted, fontSize: 12, fontWeight: '600', marginBottom: spacing.xs },
+  label: { color: colors.muted, fontSize: type.meta, fontWeight: weight.semibold, marginBottom: spacing.xs },
   project: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -132,6 +134,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
   },
   projectSelected: { backgroundColor: colors.surfaceMuted },
-  projectName: { flex: 1, color: colors.text, fontSize: 16 },
+  projectName: { flex: 1, color: colors.text, fontSize: type.body },
   error: { color: colors.danger, marginTop: spacing.sm },
 });

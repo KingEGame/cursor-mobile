@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, Switch, Text, View } from 'react-native';
 import { loadLockSettings, readDeviceAuth, saveLockSettings, unlock } from '../security/app-lock';
 import { DEFAULT_LOCK_SETTINGS, type LockSettings } from '../security/lock-policy';
-import { colors, radii, spacing } from '../theme';
+import { colors, radii, spacing, type, weight, lineHeight } from '../theme';
 
-/** Account → Security: fingerprint / PIN for sending and for opening the app. */
+/** Account → Security: fingerprint / PIN for approving tools and for opening the app. */
 export function SecurityCard() {
   const [settings, setSettings] = useState<LockSettings>(DEFAULT_LOCK_SETTINGS);
   const [available, setAvailable] = useState(true);
@@ -26,6 +26,12 @@ export function SecurityCard() {
     <View style={styles.card} testID="account-security">
       <Text style={styles.label}>Security</Text>
       {/* Unlock-to-send paused — fingerprint on every send was too noisy. */}
+      <Row
+        title="Require unlock to approve tools"
+        meta="Fingerprint or PIN before the phone lets Cursor run a tool on your PC"
+        value={settings.lockApprove}
+        onChange={(v) => void change('lockApprove', v)}
+      />
       <Row
         title="Lock app on open"
         meta="Ask again after 5 minutes in the background"
@@ -69,10 +75,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     gap: spacing.sm,
   },
-  label: { color: colors.muted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase' },
+  label: { color: colors.muted, fontSize: type.meta, fontWeight: weight.semibold, textTransform: 'uppercase' },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 48 },
   rowBody: { flex: 1 },
-  title: { color: colors.text, fontSize: 16 },
-  meta: { color: colors.muted, fontSize: 12, marginTop: 2 },
-  warn: { color: colors.warn, fontSize: 12, lineHeight: 16 },
+  title: { color: colors.text, fontSize: type.body },
+  meta: { color: colors.muted, fontSize: type.meta, marginTop: spacing.xxs },
+  warn: { color: colors.warn, fontSize: type.meta, lineHeight: lineHeight.meta },
 });

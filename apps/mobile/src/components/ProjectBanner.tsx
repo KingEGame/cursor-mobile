@@ -7,7 +7,7 @@ import {
   BANNER_PATH_NUMBER_OF_LINES,
   bannerPathDisplay,
 } from '../hub/project-banner';
-import { colors, spacing } from '../theme';
+import { colors, spacing, type, weight, lineHeight } from '../theme';
 import { HealthDot, type HealthDotLevel } from './HealthDot';
 
 interface Props {
@@ -75,31 +75,31 @@ const styles = StyleSheet.create({
   name: {
     flex: 1,
     color: colors.text,
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: type.body,
+    fontWeight: weight.semibold,
   },
   path: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: type.meta,
     fontFamily: 'monospace',
   },
   hub: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: type.meta,
   },
   meta: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: type.meta,
   },
   emptyTitle: {
     color: colors.text,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: type.body,
+    fontWeight: weight.semibold,
   },
   emptyBody: {
     color: colors.muted,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: type.meta,
+    lineHeight: lineHeight.body,
     marginBottom: spacing.sm,
   },
 });

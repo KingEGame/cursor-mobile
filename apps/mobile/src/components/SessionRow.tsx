@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatRelativeTime } from '../hub/format';
 import { sessionModeBadgeLabel } from '../hub/session-list-ux';
 import type { SessionListItem } from '../hub/types';
-import { colors, spacing } from '../theme';
+import { colors, spacing, type, weight, lineHeight } from '../theme';
 
 interface Props {
   item: SessionListItem;
@@ -70,17 +70,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.sm,
   },
-  title: { flex: 1, color: colors.text, fontSize: 16, fontWeight: '600' },
+  title: { flex: 1, color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
   badge: {
     borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.xxs,
   },
   live: { backgroundColor: colors.accent },
   hist: { backgroundColor: colors.border },
-  badgeText: { color: colors.accentText, fontSize: 11, fontWeight: '700' },
-  preview: { color: colors.muted, fontSize: 13, lineHeight: 18 },
+  badgeText: { color: colors.accentText, fontSize: type.meta, fontWeight: weight.semibold },
+  preview: { color: colors.muted, fontSize: type.meta, lineHeight: lineHeight.meta },
   meta: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  metaText: { color: colors.muted, fontSize: 12 },
-  pending: { color: colors.warn, fontSize: 12, fontWeight: '600' },
+  metaText: { color: colors.muted, fontSize: type.meta },
+  pending: { color: colors.warn, fontSize: type.meta, fontWeight: weight.semibold },
 });

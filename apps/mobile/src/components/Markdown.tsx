@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
 import { Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { looksLikePath, truncateMiddle } from '../chat/format';
 import { parseMarkdown, type Block, type Span } from '../hub/markdown';
-import { colors, spacing } from '../theme';
+import { colors, spacing, type, weight, lineHeight } from '../theme';
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
@@ -15,11 +16,12 @@ function Spans({ spans }: { spans: Span[] }) {
             s.bold && styles.bold,
             s.italic && styles.italic,
             s.code && styles.inlineCode,
+            s.code && looksLikePath(s.text) && styles.pathPill,
             s.link ? styles.link : null,
           ]}
           onPress={s.link ? () => void Linking.openURL(s.link!).catch(() => undefined) : undefined}
         >
-          {s.text}
+          {s.code && looksLikePath(s.text) ? `\u00a0${truncateMiddle(s.text)}\u00a0` : s.text}
         </Text>
       ))}
     </>
@@ -95,24 +97,25 @@ export function Markdown({ source }: { source: string }) {
 
 const styles = StyleSheet.create({
   root: { gap: spacing.sm },
-  text: { color: colors.text, fontSize: 14, lineHeight: 20 },
-  bold: { fontWeight: '700' },
+  text: { color: colors.text, fontSize: type.meta, lineHeight: lineHeight.body },
+  bold: { fontWeight: weight.semibold },
   italic: { fontStyle: 'italic' },
   inlineCode: {
     fontFamily: MONO,
-    fontSize: 13,
+    fontSize: type.meta,
     backgroundColor: colors.surfaceMuted,
   },
+  pathPill: { color: colors.text, fontSize: type.meta },
   link: { color: colors.accent, textDecorationLine: 'underline' },
-  h1: { fontSize: 17, fontWeight: '700', lineHeight: 24 },
-  h3: { fontSize: 15, fontWeight: '700' },
-  list: { gap: 2 },
+  h1: { fontSize: type.body, fontWeight: weight.semibold, lineHeight: lineHeight.sub },
+  h3: { fontSize: type.body, fontWeight: weight.semibold },
+  list: { gap: spacing.xxs },
   listRow: { flexDirection: 'row' },
   marker: { width: 22, color: colors.muted },
   listText: { flex: 1 },
   codeBox: { backgroundColor: colors.surfaceMuted, borderRadius: 6 },
   codeInner: { padding: spacing.sm },
-  code: { fontFamily: MONO, fontSize: 12, lineHeight: 18, color: colors.text },
+  code: { fontFamily: MONO, fontSize: type.meta, lineHeight: lineHeight.meta, color: colors.text },
   table: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: 6 },
   tr: {
     flexDirection: 'row',
@@ -124,7 +127,7 @@ const styles = StyleSheet.create({
     width: 160,
     padding: spacing.xs,
     color: colors.text,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: type.meta,
+    lineHeight: lineHeight.meta,
   },
 });

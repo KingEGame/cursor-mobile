@@ -15,7 +15,7 @@ import {
   type AgentModeId,
   type ComposerOverflowId,
 } from '../hub/composer-chrome';
-import { colors, radii, spacing, type } from '../theme';
+import { colors, radii, spacing, type, weight, lineHeight } from '../theme';
 
 export interface ComposerBarProps {
   inputRef?: React.RefObject<TextInput | null>;
@@ -212,8 +212,8 @@ const styles = StyleSheet.create({
   },
   plusText: {
     color: colors.text,
-    fontSize: 24,
-    fontWeight: '400',
+    fontSize: type.title,
+    fontWeight: weight.regular,
     marginTop: -2,
   },
   input: {
@@ -238,10 +238,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendDisabled: { backgroundColor: colors.border },
-  sendText: { color: colors.accentText, fontWeight: '600' },
+  sendText: { color: colors.accentText, fontWeight: weight.semibold },
   modeHint: {
     color: colors.muted,
-    fontSize: 11,
+    fontSize: type.meta,
     paddingHorizontal: spacing.md,
     paddingTop: 4,
   },
@@ -269,8 +269,8 @@ const styles = StyleSheet.create({
   },
   sheetTitle: {
     color: colors.text,
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: type.body,
+    fontWeight: weight.semibold,
     marginBottom: spacing.sm,
   },
   sheetRow: {
@@ -289,12 +289,12 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     borderBottomWidth: 0,
   },
-  sheetRowText: { flex: 1, gap: 2 },
-  sheetLabel: { color: colors.text, fontSize: type.body, fontWeight: '500' },
-  sheetHint: { color: colors.muted, fontSize: 12, lineHeight: 16 },
+  sheetRowText: { flex: 1, gap: spacing.xxs },
+  sheetLabel: { color: colors.text, fontSize: type.body, fontWeight: weight.semibold },
+  sheetHint: { color: colors.muted, fontSize: type.meta, lineHeight: lineHeight.meta },
   sheetStatus: {
     color: colors.muted,
-    fontSize: 11,
+    fontSize: type.meta,
     textTransform: 'uppercase',
     letterSpacing: 0.3,
   },
@@ -303,5 +303,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.sm,
   },
-  sheetCancelText: { color: colors.accent, fontWeight: '600', fontSize: type.body },
+  sheetCancelText: { color: colors.accent, fontWeight: weight.semibold, fontSize: type.body },
 });
