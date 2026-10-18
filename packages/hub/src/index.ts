@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { createHubContext, loadConfig } from "./config.js";
 
 export { createApp } from "./app.js";
+export { detectTailscaleIp, isTailscaleIp } from "./mesh-host.js";
 export { createHubServer } from "./server.js";
 export {
   createHubContext,

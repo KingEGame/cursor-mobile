@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
+import { detectTailscaleIp } from "./mesh-host.js";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import {
@@ -675,10 +676,15 @@ export function createHubContext(
   };
 }
 
-export function baseUrlHint(config: HubConfig): string {
-  // Prefer explicit Tailscale hostname/IP so phones never store loopback after pair.
+/**
+ * Address the phone should use. An explicit TAILSCALE_HOSTNAME wins; otherwise the Tailscale
+ * address found on this PC right now (so Windows/macOS desktop installs work without any env
+ * var, and Tailscale starting after the Hub is picked up on the next pairing).
+ */
+export function baseUrlHint(config: HubConfig, detect: () => string | null = detectTailscaleIp): string {
   const host =
     config.tailscaleHostname ||
+    detect() ||
     (config.hubHost === "0.0.0.0" || config.hubHost === "::"
       ? ""
       : config.hubHost);
@@ -692,14 +698,16 @@ export function baseUrlHint(config: HubConfig): string {
 export function buildQrPayload(
   config: HubConfig,
   pending: PendingPair,
+  detect: () => string | null = detectTailscaleIp,
 ): string {
-  const hint = baseUrlHint(config);
+  const hint = baseUrlHint(config, detect);
   let host = "127.0.0.1";
   try {
     host = new URL(hint).hostname;
   } catch {
     host =
       config.tailscaleHostname ||
+      detect() ||
       (config.hubHost === "0.0.0.0" ? "127.0.0.1" : config.hubHost);
   }
   const params = new URLSearchParams({

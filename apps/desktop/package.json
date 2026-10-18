@@ -2,7 +2,7 @@
   "name": "@cursor-mobile/desktop",
   "version": "0.1.3",
   "private": true,
-  "description": "PC-local Cursor companion Hub — desktop shell (Electron)",
+  "description": "PC-local Cursor companion Hub \u2014 desktop shell (Electron)",
   "author": "cursor-mobile",
   "main": "main.mjs",
   "type": "module",
@@ -29,6 +29,7 @@
     "files": [
       "main.mjs",
       "preload.cjs",
+      "assets/**/*",
       "renderer/**/*",
       "vendor/**/*",
       "package.json"

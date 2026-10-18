@@ -2,7 +2,7 @@
  * Electron main process — starts the embedded Hub on this PC and shows a status UI.
  * Product locks: Hub + CDP stay on the operator PC; phone is remote UI over Tailscale.
  */
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16,6 +16,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('electron').BrowserWindow | null} */
 let mainWindow = null;
+/** @type {import('electron').Tray | null} */
+let tray = null;
+/** True once the operator chose Quit: only then does closing the window stop the Hub. */
+let quitting = false;
+const ICON_PATH = join(__dirname, "assets", "tray.png");
 /** @type {{ close: () => Promise<void> } | null} */
 let hubHandle = null;
 /** @type {Record<string, unknown>} */
@@ -44,16 +49,30 @@ function applyDefaultEnv() {
   mkdirSync(process.env.HUB_DATA_DIR, { recursive: true });
 }
 
-async function detectTailscaleHint() {
+/** Where the Windows installer puts the Tailscale CLI (it is usually not on PATH). */
+const TAILSCALE_CLI = [
+  "tailscale",
+  "C:\\Program Files\\Tailscale\\tailscale.exe",
+  "C:\\Program Files (x86)\\Tailscale\\tailscale.exe",
+  "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+];
+
+/** Tailscale address of this PC: network interfaces first (no CLI), then the CLI, then env. */
+async function detectTailscaleHint(hub) {
   try {
-    const { stdout } = await execFileAsync("tailscale", ["ip", "-4"], {
-      timeout: 3000,
-      windowsHide: true,
-    });
-    const ip = stdout.trim().split(/\s+/)[0];
+    const ip = hub?.detectTailscaleIp?.();
     if (ip) return ip;
   } catch {
-    /* optional */
+    /* fall through to the CLI */
+  }
+  for (const bin of TAILSCALE_CLI) {
+    try {
+      const { stdout } = await execFileAsync(bin, ["ip", "-4"], { timeout: 3000, windowsHide: true });
+      const ip = stdout.trim().split(/\s+/)[0];
+      if (ip) return ip;
+    } catch {
+      /* try the next location */
+    }
   }
   return process.env.TAILSCALE_HOSTNAME?.trim() || null;
 }
@@ -78,7 +97,7 @@ async function startHub() {
 
   const port = config.hubPort;
   const listenUrl = `http://127.0.0.1:${port}`;
-  const ts = await detectTailscaleHint();
+  const ts = await detectTailscaleHint(hub);
   lastStatus = {
     running: true,
     listenUrl,
@@ -123,6 +142,7 @@ function createWindow() {
     minHeight: 520,
     title: "Cursor Mobile Hub",
     backgroundColor: "#f4f5f7",
+    icon: existsSync(ICON_PATH) ? ICON_PATH : undefined,
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -131,9 +151,58 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(join(__dirname, "renderer", "index.html"));
+  // Closing the window hides it: the Hub keeps running and the tray icon (or launching the app
+  // again) brings the window back. Only Quit stops the Hub.
+  mainWindow.on("close", (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    mainWindow?.hide();
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+}
+
+/** Show the status window again, recreating it if it was destroyed. */
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  broadcastStatus();
+}
+
+function quitHub() {
+  quitting = true;
+  app.quit();
+}
+
+/** Tray icon (Windows notification area, Linux StatusNotifier, macOS menu bar). */
+function createTray() {
+  try {
+    const image = existsSync(ICON_PATH) ? nativeImage.createFromPath(ICON_PATH).resize({ width: 22, height: 22 }) : nativeImage.createEmpty();
+    tray = new Tray(image);
+    tray.setToolTip("Cursor Mobile Hub — running");
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: "Open Hub", click: showWindow },
+        {
+          label: "Open pairing page (QR)",
+          click: () => {
+            if (lastStatus.pairUrl) void shell.openExternal(String(lastStatus.pairUrl));
+          },
+        },
+        { type: "separator" },
+        { label: "Quit Hub", click: quitHub },
+      ]),
+    );
+    tray.on("click", showWindow);
+    tray.on("double-click", showWindow);
+  } catch {
+    // No tray on this desktop (e.g. GNOME without an indicator extension): launching the app
+    // again still reopens the window through the single-instance handler.
+    tray = null;
+  }
 }
 
 ipcMain.handle("hub:status", async () => lastStatus);
@@ -174,15 +243,12 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
-  });
+  app.on("second-instance", () => showWindow());
+  app.on("activate", () => showWindow());
 
   app.whenReady().then(async () => {
     createWindow();
+    createTray();
     try {
       await startHub();
     } catch (err) {
@@ -195,11 +261,11 @@ if (!gotLock) {
     }
   });
 
-  app.on("window-all-closed", () => {
-    app.quit();
-  });
+  // The Hub must outlive its window: stay running until Quit.
+  app.on("window-all-closed", () => {});
 
   app.on("before-quit", () => {
+    quitting = true;
     void hubHandle?.close?.();
   });
 }
