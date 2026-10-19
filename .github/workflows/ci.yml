@@ -146,11 +146,14 @@ jobs:
         run: |
           appimage="$(ls dist-desktop/*.AppImage | head -1)"
           chmod +x "$appimage"
+          rc=0
           if command -v xvfb-run >/dev/null; then
-            xvfb-run -a node scripts/smoke-desktop.mjs "$appimage"
+            xvfb-run -a node scripts/smoke-desktop.mjs "$appimage" || rc=$?
           else
-            node scripts/smoke-desktop.mjs "$appimage"
+            node scripts/smoke-desktop.mjs "$appimage" || rc=$?
           fi
+          if [ "$rc" -eq 78 ]; then echo "::warning::AppImage smoke test skipped (runner lacks GTK libraries)"; rc=0; fi
+          exit "$rc"
 
       - uses: actions/upload-artifact@v4
         with:

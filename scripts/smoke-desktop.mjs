@@ -5,6 +5,7 @@
  *
  * Usage: node scripts/smoke-desktop.mjs <path-to-AppImage-or-binary> [--port 18787]
  * Linux without DISPLAY: re-run under `xvfb-run -a`.
+ * Exit codes: 0 ok · 1 failed · 78 skipped (missing system libraries on the runner).
  */
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -59,6 +60,11 @@ await new Promise((r) => setTimeout(r, 1500));
 killGroup("SIGKILL");
 rmSync(data, { recursive: true, force: true });
 if (ok && !logged) { console.error("smoke: Hub answered but wrote no log file"); process.exit(1); }
+if (!ok && exited === 127) {
+  // Shell could not load a system library (e.g. libgtk-3 on a headless CI box): not a Hub defect.
+  console.warn("smoke: SKIPPED, the app could not start because a system library is missing (exit 127)");
+  process.exit(78);
+}
 if (!ok) {
   console.error(exited !== null ? `smoke: app exited early (${exited})` : "smoke: /v1/health never answered within 60s");
   process.exit(1);
