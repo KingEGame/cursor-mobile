@@ -1,5 +1,5 @@
 /**
- * Native half of self-update: download the APK from the PC Hub, verify it,
+ * Native half of self-update: download the APK (GitHub releases, or the PC Hub as fallback), verify it,
  * hand it to Android's package installer. Decisions live in hub/app-update.ts.
  *
  * Android always shows its own Install confirmation for sideloaded apps, and
@@ -37,7 +37,8 @@ export interface DownloadHandle {
 
 export function startDownload(opts: {
   url: string;
-  deviceToken: string;
+  /** Only for Hub downloads; GitHub release files are public and get no Authorization header. */
+  deviceToken?: string;
   release: AppLatestAvailable;
   onProgress: (percent: number) => void;
 }): DownloadHandle {
@@ -46,7 +47,7 @@ export function startDownload(opts: {
   const task = FileSystem.createDownloadResumable(
     opts.url,
     dest,
-    { headers: { Authorization: `Bearer ${opts.deviceToken}` }, cache: false },
+    { headers: opts.deviceToken ? { Authorization: `Bearer ${opts.deviceToken}` } : {}, cache: false },
     (p) => opts.onProgress(downloadPercent(p.totalBytesWritten, opts.release.sizeBytes)),
   );
   const done = (async () => {
@@ -57,7 +58,7 @@ export function startDownload(opts: {
     if (res.status !== 200) {
       await FileSystem.deleteAsync(dest, { idempotent: true });
       throw new Error(
-        res.status === 401 ? 'This phone is no longer paired with the PC.' : `PC Hub answered ${res.status}`,
+        res.status === 401 ? 'This phone is no longer paired with the PC.' : `Download server answered ${res.status}`,
       );
     }
     return res.uri;
@@ -72,7 +73,7 @@ export function startDownload(opts: {
   };
 }
 
-/** Size + md5 against the Hub manifest; deletes the file when it does not match. */
+/** Size + md5 against the release manifest; deletes the file when it does not match. */
 export async function verifyApk(uri: string, release: AppLatestAvailable): Promise<void> {
   const info = await FileSystem.getInfoAsync(uri, { md5: true });
   const check = verifyDownload(

@@ -17,6 +17,7 @@ import { savePairingSuccess } from '../storage/pairing';
 import { ConnectionChip } from '../components/ConnectionChip';
 import { UpdateCard } from '../components/UpdateCard';
 import { decideUpdate, type UpdateStatus } from '../hub/app-update';
+import { loadLatestRelease } from '../update/feed';
 import { installedVersionCode, installedVersionLabel } from '../update/installed-version';
 import { createHubClient } from '../hub/client';
 import {
@@ -81,11 +82,10 @@ export function AccountScreen({ navigation }: Props) {
       setLastSynced(new Date());
 
       // Self-update check — an older Hub without /v1/app/* just means "no feed".
-      client
-        .getAppLatest()
+      loadLatestRelease(client)
         .then((latest) => setUpdateStatus(decideUpdate(installedVersionCode(), latest)))
         .catch(() =>
-          setUpdateStatus({ kind: 'none-published', message: 'This PC Hub does not offer app updates yet.' }),
+          setUpdateStatus({ kind: 'none-published', message: 'Cannot check for app updates right now.' }),
         );
 
       if (isWorkspaceBound(workspace)) {

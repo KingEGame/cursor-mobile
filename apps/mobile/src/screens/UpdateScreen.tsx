@@ -18,6 +18,7 @@ import {
   type UpdateStatus,
 } from '../hub/app-update';
 import { createHubClient } from '../hub/client';
+import { loadLatestRelease } from '../update/feed';
 import type { RootNav } from '../navigation/types';
 import { useAppSession } from '../session/AppSessionContext';
 import { colors, radii, spacing, type, weight, lineHeight } from '../theme';
@@ -35,7 +36,7 @@ interface Props {
 }
 
 /**
- * Self-update from the PC Hub: what's new + checks → download → verify →
+ * Self-update (GitHub first, PC Hub as fallback): what's new + checks → download → verify →
  * Android installer. Android always asks for the final Install tap.
  */
 export function UpdateScreen({ navigation }: Props) {
@@ -53,10 +54,8 @@ export function UpdateScreen({ navigation }: Props) {
   }, [session.hubBaseUrl, session.deviceToken]);
 
   useEffect(() => {
-    if (!client) return;
     let alive = true;
-    client
-      .getAppLatest()
+    loadLatestRelease(client)
       .then((latest) => alive && setStatus(decideUpdate(installedVersionCode(), latest)))
       .catch((err) => alive && setLoadError(err instanceof Error ? err.message : 'Cannot reach the PC'));
     return () => {
@@ -68,15 +67,16 @@ export function UpdateScreen({ navigation }: Props) {
   useEffect(() => () => void download.current?.cancel(), []);
 
   const install = useCallback(async () => {
-    if (status.kind !== 'available' || !client) return;
-    const token = client.getDeviceToken();
-    if (!token) return;
+    if (status.kind !== 'available') return;
     const { release } = status;
+    // GitHub releases are public; only a Hub download needs this phone's pairing token.
+    const token = client?.getDeviceToken() ?? undefined;
+    if (!release.downloadUrl && (!client || !token)) return;
     try {
       setPhase({ step: 'downloading', percent: 0 });
       const handle = startDownload({
-        url: client.appDownloadUrl(release.downloadPath),
-        deviceToken: token,
+        url: release.downloadUrl ?? (client as NonNullable<typeof client>).appDownloadUrl(release.downloadPath),
+        deviceToken: release.downloadUrl ? undefined : token,
         release,
         onProgress: (percent) => setPhase({ step: 'downloading', percent }),
       });
@@ -137,7 +137,8 @@ export function UpdateScreen({ navigation }: Props) {
       <View style={styles.header}>
         <Text style={styles.title}>{release.versionName} is ready</Text>
         <Text style={styles.lead}>
-          {formatMegabytes(release.sizeBytes)} · from the Hub on {session.hubDisplayName || 'your PC'}
+          {formatMegabytes(release.sizeBytes)} ·{' '}
+          {release.source === 'github' ? 'from GitHub' : `from the Hub on ${session.hubDisplayName || 'your PC'}`}
         </Text>
       </View>
 

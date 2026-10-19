@@ -281,3 +281,17 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
             --notes "Gate green · ${{ needs.gate.outputs.tests-passed }} tests · APK + latest.json (phone via PC Hub) · Hub desktop: Linux AppImage, Windows portable .exe, macOS zip (x64+arm64). Unsigned desktop binaries in v1."
+      - name: Mirror APK + latest.json to the public releases repo (phone downloads from there)
+        # Needs a fine-grained PAT (contents: write on KingEGame/cursor-mobile-releases) as secret RELEASES_REPO_TOKEN.
+        # Without it this step is skipped and the mirror is done by hand: see docs/reports.
+        env:
+          RELEASES_REPO_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        run: |
+          if [ -z "$RELEASES_REPO_TOKEN" ]; then
+            echo "::warning::RELEASES_REPO_TOKEN not set; phone GitHub feed not updated"
+            exit 0
+          fi
+          GH_TOKEN="$RELEASES_REPO_TOKEN" gh release create "$GITHUB_REF_NAME" dist-apk/* \
+            --repo KingEGame/cursor-mobile-releases \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Cursor Mobile companion ${GITHUB_REF_NAME} (APK + manifest). Binaries only."

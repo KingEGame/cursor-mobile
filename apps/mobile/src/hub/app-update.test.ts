@@ -5,6 +5,8 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   decideUpdate,
+  GITHUB_LATEST_URL,
+  parseGithubLatest,
   downloadPercent,
   formatMegabytes,
   parseInstalledVersionCode,
@@ -111,5 +113,38 @@ describe('wiring', () => {
   it('Android may install packages (permission in app.config)', () => {
     const cfg = readFileSync(resolve(root, 'app.config.ts'), 'utf8');
     assert.match(cfg, /REQUEST_INSTALL_PACKAGES/);
+  });
+});
+
+describe('parseGithubLatest', () => {
+  const manifest = {
+    versionName: '0.1.6',
+    versionCode: 106,
+    apkFile: 'cursor-mobile-0.1.6-106.apk',
+    sizeBytes: 111360652,
+    sha256: 'a'.repeat(64),
+    md5: 'b'.repeat(32),
+    publishedAt: '2026-10-19T03:04:11.302Z',
+    notes: ['x'],
+  };
+  it('maps latest.json to a public download URL', () => {
+    const r = parseGithubLatest(manifest);
+    assert.equal(r?.source, 'github');
+    assert.equal(
+      r?.downloadUrl,
+      'https://github.com/KingEGame/cursor-mobile-releases/releases/download/v0.1.6/cursor-mobile-0.1.6-106.apk',
+    );
+    assert.match(GITHUB_LATEST_URL, /^https:\/\/github\.com\/KingEGame\/cursor-mobile-releases\//);
+  });
+  it('rejects incomplete, odd or path-traversing manifests', () => {
+    assert.equal(parseGithubLatest(null), null);
+    assert.equal(parseGithubLatest({ ...manifest, md5: '' }), null);
+    assert.equal(parseGithubLatest({ ...manifest, versionCode: 0 }), null);
+    assert.equal(parseGithubLatest({ ...manifest, apkFile: '../evil.apk' }), null);
+    assert.equal(parseGithubLatest({ ...manifest, apkFile: 'a.zip' }), null);
+  });
+  it('feeds decideUpdate like a Hub release', () => {
+    assert.equal(decideUpdate(102, parseGithubLatest(manifest)).kind, 'available');
+    assert.equal(decideUpdate(106, parseGithubLatest(manifest)).kind, 'up-to-date');
   });
 });
