@@ -48,6 +48,33 @@
         <button type="button" id="btnRefresh" class="secondary">Refresh</button>
       </section>
 
+      <section class="card" aria-live="polite">
+        <div class="row">
+          <span class="label">Version</span>
+          <span id="version" class="value mono">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Update</span>
+          <span id="updateState" class="value">—</span>
+        </div>
+        <div class="actions" style="margin-top:10px">
+          <button type="button" id="btnUpdate" class="secondary">Check for updates</button>
+          <button type="button" id="btnFirewall" class="secondary" hidden>Allow phone access (firewall)</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="row">
+          <span class="label" data-i18n="startup">Start with system</span>
+          <label class="value"><input type="checkbox" id="autostart" /></label>
+        </div>
+        <div class="actions" style="margin-top:10px">
+          <button type="button" id="btnDiag" class="secondary" data-i18n="diag">Why can't my phone connect?</button>
+          <button type="button" id="btnLogs" class="secondary" data-i18n="logs">Open log folder</button>
+        </div>
+        <ul id="diagList" class="diag" hidden></ul>
+      </section>
+
       <p class="hint">
         On the phone: join the same Tailscale mesh, install the companion APK, then Scan QR.
         The phone never dials CDP.

@@ -21,6 +21,8 @@ STEPS=(
   "test:hub+adapters+mcp|npm test"
   # Mobile: tsc --noEmit + node:test suites.
   "test:mobile|npm run test:mobile"
+  # Desktop Hub supervisor (backoff / status mapping / restart) — pure logic, no Electron needed.
+  "test:desktop-supervisor|node --test apps/desktop/hub-supervisor.test.mjs apps/desktop/updater.test.mjs apps/desktop/heartbeat.test.mjs"
   "test:release-scripts|node --test scripts/release-scripts.test.mjs"
   # The Claude plugin ships a bundled copy of packages/mcp; it must match the source.
   "plugin:bundle-fresh|git diff --quiet -- claude-plugin/cursor-hub/server || { echo 'claude-plugin bundle is stale: commit the output of npm run plugin:build'; exit 1; }"

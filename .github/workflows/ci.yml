@@ -142,6 +142,16 @@ jobs:
       - name: Package Linux Hub desktop
         run: node scripts/package-desktop.mjs --platform linux
 
+      - name: Smoke-test the packaged AppImage (health answers)
+        run: |
+          appimage="$(ls dist-desktop/*.AppImage | head -1)"
+          chmod +x "$appimage"
+          if command -v xvfb-run >/dev/null; then
+            xvfb-run -a node scripts/smoke-desktop.mjs "$appimage"
+          else
+            node scripts/smoke-desktop.mjs "$appimage"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: hub-desktop-linux
