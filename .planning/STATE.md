@@ -1,6 +1,6 @@
 # Project state
 
-- **Stopped at:** Phase 5 mobile UX contract — **plan locked** (Amendments A–E + decisions 1–11)
+- **Stopped at:** 2026-10-21 multi-PC pairing + QR/OTP fixes + app optimization shipped (see `docs/reports/handoff-multipc-pairing-2026-10-21.md`); Phase 5 mobile UX contract remains **plan locked** (Amendments A–G)
 - **Canonical plan:** `.planning/phases/05-mobile-ux-contract/05-UI-SPEC.md`
 - **Feature map:** `docs/features/phone-apk-screens.md`
 - **Sync notes:** `docs/reports/sync-diagnosis-2026-10-01.md`

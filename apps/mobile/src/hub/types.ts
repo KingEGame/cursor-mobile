@@ -64,6 +64,9 @@ export interface HealthResponse {
   hub: {
     status: HubStatus;
     uptimeSec: number;
+    /** Hub ≥ 0.1.8: which PC answered. */
+    displayName?: string;
+    hubId?: string;
   };
   cdp: {
     status: CdpStatus;
@@ -108,6 +111,8 @@ export interface PairCompleteResponse {
   hub: {
     displayName: string;
     baseUrlHint: string;
+    /** Hub ≥ 0.1.8: stable id of that PC's Hub install. */
+    hubId?: string;
   };
 }
 

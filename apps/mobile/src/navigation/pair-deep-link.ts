@@ -12,6 +12,8 @@ const PAIR_KEYS = [
   'deviceToken',
   'deviceId',
   'hubDisplayName',
+  'name',
+  'hub',
 ] as const satisfies ReadonlyArray<keyof PairDeepLinkParams>;
 
 /** Soft decode — URLSearchParams already decodes; avoid throwing on `%`. */

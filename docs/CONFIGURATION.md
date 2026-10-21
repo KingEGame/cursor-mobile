@@ -24,7 +24,7 @@
 | `HUB_DATA_DIR` | Optional | `./data` | Durable pairing store (`devices.json`). Set `none`/`off` for in-memory only | Phase 4 |
 | `HUB_RELEASES_DIR` | Optional | `<HUB_DATA_DIR>/releases` | Phone self-update feed (`latest.json` + APK) served on `GET /v1/app/latest` · `/v1/app/apk`. `none`/`off` disables. See [release-gate-and-self-update](features/release-gate-and-self-update.md) | Phase 4 |
 | `CM_KEYSTORE_FILE` · `CM_KEYSTORE_PASSWORD` · `CM_KEY_ALIAS` · `CM_KEY_PASSWORD` | Optional (build time) | unset → template debug key | Release APK signing (`apps/mobile/plugins/with-release-signing.js`) | Phase 4 |
-| `HUB_DISPLAY_NAME` | Optional | `Desk PC` | Label in pair responses | Phase 0 |
+| `HUB_DISPLAY_NAME` | Optional | machine hostname | Name the phone shows for this PC (Account → Computer, QR `name=`) | Phase 0 |
 | `WORKSPACE_POLL_MS` | Optional | TBD | Refresh interval for live workspace detect | DESIGNED |
 | `EXPO_PUBLIC_HUB_URL` | Optional (APK) | — | **Build-time default only** (baked into `extra.hubUrl`). Pair screen always accepts a runtime Hub URL and persists it in SecureStore — **rebuild not required** to point at Tailscale Hub. This PC (2026-09-30): `http://100.108.160.99:8787` / MagicDNS `http://kingwarpc-1.tail246b3f.ts.net:8787` (legacy `100.91.47.68` / `kingwarpc…` may be offline) | Phase 0 (`apps/mobile`) |
 

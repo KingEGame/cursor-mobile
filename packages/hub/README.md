@@ -48,7 +48,7 @@ Copy [`.env.example`](../../.env.example) or export:
 | `LIVE_SELECTOR_PACK_READY` | `false` | Ops smoke override only; prefer per-action VERIFIED flags after manual Cursor UI check ([CONFIGURATION.md](../../docs/CONFIGURATION.md)) |
 | `PAIRING_REQUIRED` | `true` | Require Bearer on protected routes |
 | `TAILSCALE_HOSTNAME` | unset | Used in QR `baseUrlHint` |
-| `HUB_DISPLAY_NAME` | `Desk PC` | Shown after pair |
+| `HUB_DISPLAY_NAME` | machine hostname | Name the phone shows for this PC (multi-PC picker) |
 
 ```mermaid
 flowchart LR

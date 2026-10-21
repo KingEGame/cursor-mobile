@@ -41,6 +41,17 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     plugins: [
       ...(config.plugins ?? []),
+      // Release APK: R8 code shrinking + resource shrinking (smaller download, faster cold start).
+      // Debug builds are untouched. Expo / RN modules ship their own keep rules.
+      [
+        'expo-build-properties',
+        {
+          android: {
+            enableProguardInReleaseBuilds: true,
+            enableShrinkResourcesInReleaseBuilds: true,
+          },
+        },
+      ],
       './plugins/with-release-signing',
       // Hub speaks HTTP on Tailscale (PC-local mesh); Expo ignores
       // android.usesCleartextTraffic, so the manifest flag comes from this plugin.

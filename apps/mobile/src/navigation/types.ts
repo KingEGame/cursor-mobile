@@ -20,6 +20,9 @@ export type RootStackParamList = {
         deviceToken?: string;
         deviceId?: string;
         hubDisplayName?: string;
+        /** QR identity (Hub ≥ 0.1.8): PC name and stable hub id. */
+        name?: string;
+        hub?: string;
       };
   Health: undefined;
   /**
@@ -62,6 +65,8 @@ export interface AppSession {
   deviceToken: string | null;
   deviceId: string | null;
   hubDisplayName: string | null;
+  /** Stable id of the active PC's Hub (Hub ≥ 0.1.8). */
+  hubId: string | null;
   health: HealthResponse | null;
   workspace: WorkspaceResponse | null;
   healthLevel: HealthDotLevel;

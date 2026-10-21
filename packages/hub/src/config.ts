@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
+import { hostname } from "node:os";
 import { detectTailscaleIp } from "./mesh-host.js";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -15,6 +16,7 @@ import { IdempotencyStore } from "./idempotency.js";
 import { SessionAttachmentStore } from "./session-attachments.js";
 import { SessionCreateQueue } from "./session-create-queue.js";
 import { defaultAgentsIndex, type AgentsIndex } from "./agents.js";
+import { PairAttemptLimiter } from "./pair-limiter.js";
 import {
   devicesFilePath,
   loadDevicesFromDisk,
@@ -37,7 +39,13 @@ export interface HubConfig {
   /** null = non-expiring device tokens (Phase 0). */
   pairingTokenTtlSec: number | null;
   tailscaleHostname: string;
+  /** Name the phone shows for this PC (Account → Computer). Default: this machine's hostname. */
   hubDisplayName: string;
+  /**
+   * Stable identity of this Hub install (hostname + data dir), so the phone can tell two PCs
+   * apart even when a Tailscale address changes. Not a secret.
+   */
+  hubId: string;
   /** Optional env stub for workspace when CDP detection is unavailable. */
   cursorWorkspace: string | null;
   /**
@@ -97,7 +105,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
         ? pairingTokenTtlSec
         : null,
     tailscaleHostname: env.TAILSCALE_HOSTNAME?.trim() || "",
-    hubDisplayName: env.HUB_DISPLAY_NAME?.trim() || "Desk PC",
+    hubDisplayName: env.HUB_DISPLAY_NAME?.trim() || defaultHubDisplayName(),
+    hubId: computeHubId(resolveHubDataDir(env.HUB_DATA_DIR)),
     cursorWorkspace: env.CURSOR_WORKSPACE?.trim() || null,
     cursorWorkspaceRoots: parseWorkspaceRootsEnv(env.CURSOR_WORKSPACE_ROOTS),
     cursorModels: env.CURSOR_MODELS?.trim() || null,
@@ -113,6 +122,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
     allowSyntheticApprovals:
       (env.HUB_ALLOW_SYNTHETIC_APPROVALS ?? "").trim() === "1",
   };
+}
+
+/** Machine hostname without a trailing domain; "PC" when the OS gives nothing usable. */
+export function defaultHubDisplayName(host: string = hostname()): string {
+  const short = host.trim().split(".")[0] ?? "";
+  return short.length > 0 ? short.slice(0, 40) : "PC";
+}
+
+/** 12 hex chars from hostname + data dir — the same install always reports the same id. */
+export function computeHubId(dataDir: string | null, host: string = hostname()): string {
+  return createHash("sha256")
+    .update(`${host.trim().toLowerCase()}|${dataDir ?? ""}`)
+    .digest("hex")
+    .slice(0, 12);
 }
 
 /** Unset → `<dataDir>/releases` (null when there is no data dir). Empty/none/off → null. */
@@ -144,6 +167,12 @@ function resolveHubDataDir(raw: string | undefined): string | null {
 
 /** lastSeenAt is written to disk at most this often per device. */
 const LAST_SEEN_PERSIST_MS = 5 * 60_000;
+/** Expired pairing codes stay addressable (as "expired") this long before being forgotten. */
+const PENDING_SWEEP_GRACE_MS = 10 * 60_000;
+
+export type PendingLookup =
+  | { ok: true; pending: PendingPair }
+  | { ok: false; reason: "unknown_pair" | "code_mismatch" | "unknown_code" };
 
 export interface PendingPair {
   pairId: string;
@@ -263,10 +292,26 @@ export class PairingStore {
     }
   }
 
+  /**
+   * Drop pending codes that expired more than `graceMs` ago. The grace keeps "expired"
+   * distinguishable from "unknown" for a while after the countdown ends. Returns the count.
+   */
+  sweepExpired(now: number = Date.now(), graceMs: number = PENDING_SWEEP_GRACE_MS): number {
+    let removed = 0;
+    for (const [id, p] of this.pending) {
+      if (p.expiresAt.getTime() + graceMs < now) {
+        this.pending.delete(id);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
   start(opts: {
     ttlSec: number;
     label: string;
   }): PendingPair {
+    this.sweepExpired();
     const pairId = newId("pair");
     const code = generatePairCode();
     const pending: PendingPair = {
@@ -289,15 +334,27 @@ export class PairingStore {
   }
 
   findPending(code: string, pairId?: string): PendingPair | undefined {
+    const found = this.lookupPending(code, pairId);
+    return found.ok ? found.pending : undefined;
+  }
+
+  /**
+   * Like findPending, but says why nothing matched so the phone can show a useful message:
+   * `unknown_pair` — the pairId was never issued by this process (Hub restarted, or the QR
+   * came from another PC); `code_mismatch` — pairId known but the code differs;
+   * `unknown_code` — manual code entry that matches no pending code here.
+   */
+  lookupPending(code: string, pairId?: string): PendingLookup {
     if (pairId) {
       const byId = this.pending.get(pairId);
-      if (byId && byId.code === code) return byId;
-      return undefined;
+      if (!byId) return { ok: false, reason: "unknown_pair" };
+      if (byId.code !== code) return { ok: false, reason: "code_mismatch" };
+      return { ok: true, pending: byId };
     }
     for (const p of this.pending.values()) {
-      if (p.code === code) return p;
+      if (p.code === code) return { ok: true, pending: p };
     }
-    return undefined;
+    return { ok: false, reason: "unknown_code" };
   }
 
   complete(
@@ -643,6 +700,8 @@ export interface HubContext {
   } | null;
   /** Pending New-session creates while liveAdapter is cursor_down (PC-local). */
   sessionCreateQueue: SessionCreateQueue;
+  /** Wrong pair codes per caller address → 429 for a while. */
+  pairLimiter: PairAttemptLimiter;
 }
 
 export function createHubContext(
@@ -657,6 +716,7 @@ export function createHubContext(
     attachments: SessionAttachmentStore;
     ws: HubEventBus | null;
     sessionCreateQueue: SessionCreateQueue;
+    pairLimiter: PairAttemptLimiter;
   }>,
 ): HubContext {
   return {
@@ -673,6 +733,7 @@ export function createHubContext(
     ws: overrides?.ws ?? null,
     lastSessionCreateAttempt: null,
     sessionCreateQueue: overrides?.sessionCreateQueue ?? new SessionCreateQueue(),
+    pairLimiter: overrides?.pairLimiter ?? new PairAttemptLimiter(),
   };
 }
 
@@ -715,6 +776,10 @@ export function buildQrPayload(
     port: String(config.hubPort),
     code: pending.code,
     pairId: pending.pairId,
+    // Which PC this QR belongs to — the phone shows the name while pairing and uses the id
+    // to keep one saved entry per PC in Account → Computer.
+    name: pending.label || config.hubDisplayName,
+    hub: config.hubId,
   });
   return `cursor-companion://pair?${params.toString()}`;
 }

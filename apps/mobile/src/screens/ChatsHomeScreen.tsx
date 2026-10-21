@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   FlatList,
   Pressable,
   RefreshControl,
@@ -95,9 +96,12 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
     });
   }, [session.hubBaseUrl, session.deviceToken]);
 
-  /** Silent by default; only a user pull shows the spinner. */
+  /**
+   * Silent by default; only a user pull shows the spinner. `quiet` (timer ticks) re-reads
+   * just the chat list: health + workspace change rarely and arrive over the WS anyway.
+   */
   const refresh = useCallback(
-    async (opts?: { pull?: boolean }) => {
+    async (opts?: { pull?: boolean; quiet?: boolean }) => {
       if (!client) {
         navigation.replace('Pair');
         return;
@@ -106,13 +110,17 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
       inFlight.current = true;
       if (opts?.pull) setPulling(true);
       try {
-        const [health, workspace, list] = await Promise.all([
-          client.getHealth(),
-          client.getWorkspace(),
-          client.listAgents(),
-        ]);
-        setHealthAndWorkspace(health, workspace);
-        setAgents(list);
+        if (opts?.quiet) {
+          setAgents(await client.listAgents());
+        } else {
+          const [health, workspace, list] = await Promise.all([
+            client.getHealth(),
+            client.getWorkspace(),
+            client.listAgents(),
+          ]);
+          setHealthAndWorkspace(health, workspace);
+          setAgents(list);
+        }
         setError(null);
         setLastApiError(null);
       } catch (err) {
@@ -145,12 +153,20 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
     }, 400);
   }, [refresh]);
 
+  // Poll only while the app is on screen; a backgrounded phone must not wake the PC Hub
+  // every 15 s. Coming back to the foreground does one full refresh.
   useFocusEffect(
     useCallback(() => {
       void refresh();
-      const id = setInterval(() => void refresh(), POLL_MS);
+      const id = setInterval(() => {
+        if (AppState.currentState === 'active') void refresh({ quiet: true });
+      }, POLL_MS);
+      const sub = AppState.addEventListener('change', (state) => {
+        if (state === 'active') void refresh();
+      });
       return () => {
         clearInterval(id);
+        sub.remove();
         if (refreshTimer.current) clearTimeout(refreshTimer.current);
       };
     }, [refresh]),
@@ -207,7 +223,7 @@ export function ChatsHomeScreen({ navigation, onOpenAccount }: Props) {
 
   const waiting = countWaiting(agents);
   const working = countWorking(agents);
-  const hubName = session.hubDisplayName || 'Desk PC';
+  const hubName = session.hubDisplayName || 'PC';
 
   const openChat = (chat: AgentsChatRow) => {
     navigation.navigate('HistoryRead', { sessionId: chat.sessionId, title: chat.title });

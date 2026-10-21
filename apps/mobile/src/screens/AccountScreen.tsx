@@ -11,9 +11,9 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check, ChevronRight, Monitor, RefreshCw } from 'lucide-react-native';
-import { loadKnownHubs, rememberHub, type KnownHub } from '../storage/known-hubs';
-import { savePairingSuccess } from '../storage/pairing';
+import { Check, ChevronRight, Monitor, Plus, RefreshCw, X } from 'lucide-react-native';
+import { loadKnownHubs, rememberHub, removeKnownHub, saveKnownHubs, type KnownHub } from '../storage/known-hubs';
+import { hubReachLabel, probeHub, switchFailureText, switchToHub, type HubReach } from '../storage/hub-switch';
 import { ConnectionChip } from '../components/ConnectionChip';
 import { UpdateCard } from '../components/UpdateCard';
 import { decideUpdate, type UpdateStatus } from '../hub/app-update';
@@ -50,6 +50,7 @@ export function AccountScreen({ navigation }: Props) {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ kind: 'unknown' });
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
   const [knownHubs, setKnownHubs] = useState<KnownHub[]>([]);
+  const [reach, setReach] = useState<Record<string, HubReach>>({});
   const [switchError, setSwitchError] = useState<string | null>(null);
   const { refreshFromStorage } = session;
 
@@ -118,6 +119,14 @@ export function AccountScreen({ navigation }: Props) {
     void refresh();
   }, [refresh]);
 
+  /** Ask every saved PC whether it is up and still trusts this phone (parallel, short timeout). */
+  const probeAll = useCallback((list: KnownHub[]) => {
+    setReach(Object.fromEntries(list.map((h) => [h.hubBaseUrl, 'checking' as HubReach])));
+    for (const hub of list) {
+      void probeHub(hub).then((r) => setReach((prev) => ({ ...prev, [hub.hubBaseUrl]: r })));
+    }
+  }, []);
+
   // Saved PCs; seed the list with the current pairing for phones paired before it existed.
   useEffect(() => {
     void (async () => {
@@ -128,29 +137,48 @@ export function AccountScreen({ navigation }: Props) {
           deviceToken: session.deviceToken,
           deviceId: session.deviceId,
           hubDisplayName: session.hubDisplayName,
+          hubId: session.hubId,
         });
         list = await loadKnownHubs();
       }
       setKnownHubs(list);
+      probeAll(list);
     })();
-  }, [session.deviceToken, session.deviceId, session.hubBaseUrl, session.hubDisplayName]);
+  }, [session.deviceToken, session.deviceId, session.hubBaseUrl, session.hubDisplayName, session.hubId, lastSynced, probeAll]);
 
   /** Switch the phone to another saved PC; stay on the current one if it cannot be reached. */
   const switchTo = async (hub: KnownHub) => {
     setSwitchError(null);
-    try {
-      await createHubClient({ baseUrl: hub.hubBaseUrl, deviceToken: hub.deviceToken }).getHealth();
-    } catch {
-      setSwitchError(`${hub.hubDisplayName || hub.hubBaseUrl} is not reachable — staying on this PC`);
+    setReach((prev) => ({ ...prev, [hub.hubBaseUrl]: 'checking' }));
+    const result = await switchToHub(hub);
+    setReach((prev) => ({ ...prev, [hub.hubBaseUrl]: result }));
+    if (result !== 'ok') {
+      setSwitchError(switchFailureText(hub, result));
       return;
     }
-    await savePairingSuccess({
-      hubBaseUrl: hub.hubBaseUrl,
-      deviceToken: hub.deviceToken,
-      deviceId: hub.deviceId,
-      hubDisplayName: hub.hubDisplayName || 'PC',
-    });
     await refreshFromStorage();
+  };
+
+  /** Drop a saved PC (never the active one) after confirming. */
+  const forget = (hub: KnownHub) => {
+    Alert.alert(
+      `Forget ${hub.hubDisplayName || 'this PC'}?`,
+      'This phone will need to scan that PC\'s QR again to use it.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Forget',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              const next = removeKnownHub(knownHubs, hub.hubBaseUrl);
+              await saveKnownHubs(next);
+              setKnownHubs(next);
+            })();
+          },
+        },
+      ],
+    );
   };
 
   const unpair = () => {
@@ -200,39 +228,69 @@ export function AccountScreen({ navigation }: Props) {
         <Row title="Status" meta={connectionStateLabel(connectionState)} />
         <Row
           title="How it works"
-          meta="On the PC, open http://127.0.0.1:8787/pair in a browser — that page shows the QR. On this phone tap Pair with Hub → Scan QR. Do not type that loopback URL on the phone. Cursor stays on the PC; the phone is remote UI over Tailscale."
+          meta="On the PC, open http://127.0.0.1:8787/pair in a browser — that page shows a QR for that PC. On this phone tap Pair a PC → Scan QR. Do not type that loopback URL on the phone. Cursor stays on the PC; the phone is remote UI over Tailscale."
         />
-        <ActionRow label="Pair with Hub" onPress={() => navigation.navigate('Pair')} testID="account-repair" />
+        <ActionRow label="Pair a PC" meta="Scan the QR on a PC's pair page (new PC or re-pair)" onPress={() => navigation.navigate('Pair')} testID="account-repair" />
       </View>
 
       <Text style={styles.section}>Computer</Text>
       <View style={styles.card}>
-        <Text style={styles.cardMeta}>Chats and projects come from this PC's Hub.</Text>
-        {(knownHubs.length ? knownHubs : []).map((hub) => {
+        <Text style={styles.cardMeta}>Chats and projects come from the selected PC. Tap another PC to switch; each PC is paired once.</Text>
+        {knownHubs.map((hub) => {
           const active = hub.hubBaseUrl === session.hubBaseUrl;
+          const r = reach[hub.hubBaseUrl];
+          const dot = r === 'ok' ? colors.healthy : r === 'unauthorized' || r === 'not_hub' ? colors.degraded : r === 'unreachable' ? colors.down : colors.border;
+          const name = hub.hubDisplayName || 'PC';
           return (
-            <Pressable
-              key={hub.hubBaseUrl}
-              style={({ pressed }) => [styles.pcRow, pressed && !active && styles.pressed]}
-              onPress={() => (active ? undefined : void switchTo(hub))}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel="Choose computer"
-            >
-              <Monitor size={20} color={active ? colors.accent : colors.muted} strokeWidth={1.75} />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.rowTitle, active && { color: colors.accent }]}>
-                  {hub.hubDisplayName || 'PC'}
-                </Text>
-                <Text style={styles.cardMeta}>{hub.hubBaseUrl}</Text>
-              </View>
-              {active ? <Check size={18} color={colors.accent} /> : null}
-            </Pressable>
+            <View key={hub.hubBaseUrl} style={styles.pcRowWrap}>
+              <Pressable
+                style={({ pressed }) => [styles.pcRow, pressed && !active && styles.pressed]}
+                onPress={() => (active ? undefined : void switchTo(hub))}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${name}, ${hubReachLabel(r) || 'status unknown'}${active ? ', selected' : ''}`}
+                testID={`account-pc-${hub.hubBaseUrl}`}
+              >
+                <Monitor size={20} color={active ? colors.accent : colors.muted} strokeWidth={1.75} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.rowTitle, active && { color: colors.accent }]}>{name}</Text>
+                  <View style={styles.reachRow}>
+                    <View style={[styles.reachDot, { backgroundColor: dot }]} />
+                    <Text style={styles.cardMeta} numberOfLines={1}>
+                      {hubReachLabel(r) || '—'} · {hub.hubBaseUrl}
+                    </Text>
+                  </View>
+                </View>
+                {active ? <Check size={18} color={colors.accent} /> : null}
+              </Pressable>
+              {!active ? (
+                <Pressable
+                  onPress={() => forget(hub)}
+                  style={({ pressed }) => [styles.forgetBtn, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Forget ${name}`}
+                  hitSlop={6}
+                >
+                  <X size={18} color={colors.muted} strokeWidth={2} />
+                </Pressable>
+              ) : null}
+            </View>
           );
         })}
-        {knownHubs.length === 0 ? <Text style={styles.cardMeta}>No computers saved — pair with a Hub first.</Text> : null}
+        {knownHubs.length === 0 ? <Text style={styles.cardMeta}>No computers saved — pair with a PC first.</Text> : null}
         {switchError ? <Text style={styles.error}>{switchError}</Text> : null}
-        <Row title="Project bound on PC" meta={`${projectName}${session.workspace && isWorkspaceBound(session.workspace) ? ' · ' + session.workspace.path : ''}`} />
+        <Pressable
+          style={({ pressed }) => [styles.actionRow, pressed && styles.pressed]}
+          onPress={() => navigation.navigate('Pair')}
+          accessibilityRole="button"
+          accessibilityLabel="Add another PC"
+          testID="account-add-pc"
+        >
+          <Plus size={18} color={colors.accent} strokeWidth={2} />
+          <Text style={[styles.rowTitle, { color: colors.accent, marginLeft: spacing.xs, flex: 1 }]}>Add another PC</Text>
+          <ChevronRight size={18} color={colors.muted} />
+        </Pressable>
+        <Row title="Project open on this PC" meta={`${projectName}${session.workspace && isWorkspaceBound(session.workspace) ? ' · ' + session.workspace.path : ''}`} />
       </View>
 
       <Text style={styles.section}>Sync</Text>
@@ -304,7 +362,11 @@ const styles = StyleSheet.create({
   section: { color: colors.muted, fontSize: type.meta, fontWeight: weight.semibold, marginTop: spacing.md, marginBottom: spacing.xs },
   row: { paddingVertical: spacing.xs, gap: spacing.xxs },
   rowTitle: { color: colors.text, fontSize: type.body },
-  pcRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 52, borderRadius: radii.sm, paddingHorizontal: spacing.xs },
+  pcRowWrap: { flexDirection: 'row', alignItems: 'center' },
+  pcRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 52, borderRadius: radii.sm, paddingHorizontal: spacing.xs },
+  reachRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
+  reachDot: { width: 7, height: 7, borderRadius: 4 },
+  forgetBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: radii.sm },
   actionRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderRadius: radii.sm, paddingHorizontal: spacing.xs },
   pressed: { backgroundColor: colors.surfaceMuted },
   primary: {

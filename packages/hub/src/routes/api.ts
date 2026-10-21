@@ -8,6 +8,7 @@ import {
 import { ApiError } from "../errors.js";
 import { requirePaired } from "../auth.js";
 import {
+  clientRemoteAddress,
   isLocalClient,
   requireLocal,
   requireLocalOrSyntheticFlag,
@@ -111,6 +112,9 @@ async function healthHandler(ctx: HubContext, _req: Request, res: Response) {
     hub: {
       status: "up",
       uptimeSec: Math.floor((Date.now() - ctx.startedAt) / 1000),
+      // Which PC answered — the phone keeps one Account → Computer entry per hubId.
+      displayName: ctx.config.hubDisplayName,
+      hubId: ctx.config.hubId,
     },
     cdp: {
       status: probe.status,
@@ -200,10 +204,37 @@ function pairConfirmHandler(ctx: HubContext, req: Request, res: Response) {
     throw new ApiError(400, "VALIDATION_ERROR", "appVersion is required");
   }
 
-  const pending = ctx.pairing.findPending(code, pairId);
-  if (!pending) {
-    throw new ApiError(400, "PAIR_CODE_INVALID", "Unknown or mismatched pair code");
+  // Wrong codes from one address are limited; the pair page on the PC is loopback-only, so a
+  // mesh peer guessing codes is the only caller that trips this.
+  const caller = clientRemoteAddress(req) ?? "unknown";
+  const retryAfter = ctx.pairLimiter.retryAfterSec(caller);
+  if (retryAfter > 0) {
+    res.setHeader("Retry-After", String(retryAfter));
+    throw new ApiError(
+      429,
+      "RATE_LIMITED",
+      `Too many wrong pair codes from this phone. Wait ${retryAfter}s, then get a new code on the PC pair page.`,
+      { bucket: "pair", retryAfterSec: retryAfter },
+    );
   }
+
+  const found = ctx.pairing.lookupPending(code, pairId);
+  if (!found.ok) {
+    ctx.pairLimiter.recordFailure(caller);
+    const pc = ctx.config.hubDisplayName;
+    const message =
+      found.reason === "unknown_pair"
+        ? `This QR is not known to ${pc}. Either the Hub on ${pc} restarted after the QR was shown, or the QR belongs to another PC. On the PC, reload the pair page and scan again.`
+        : found.reason === "code_mismatch"
+          ? `The code does not match this QR. On the PC, reload the pair page and scan the new QR.`
+          : `No pending code ${code} on ${pc}. Check the PC address you typed matches the pair page on that PC, then type the code shown there.`;
+    throw new ApiError(400, "PAIR_CODE_INVALID", message, {
+      reason: found.reason,
+      hubId: ctx.config.hubId,
+      hubDisplayName: pc,
+    });
+  }
+  const pending = found.pending;
 
   try {
     const device = ctx.pairing.complete(pending, {
@@ -220,8 +251,10 @@ function pairConfirmHandler(ctx: HubContext, req: Request, res: Response) {
       hub: {
         displayName: pending.label || ctx.config.hubDisplayName,
         baseUrlHint: baseUrlHint(ctx.config),
+        hubId: ctx.config.hubId,
       },
     });
+    ctx.pairLimiter.clear(caller);
   } catch (err) {
     const codeName =
       err instanceof Error && "code" in err

@@ -177,7 +177,7 @@ async function applyTokenInjectFromUrl(
     hubBaseUrl: base,
     deviceToken: params.deviceToken!.trim(),
     deviceId: params.deviceId!.trim(),
-    hubDisplayName: params.hubDisplayName?.trim() || 'Desk PC',
+    hubDisplayName: params.hubDisplayName?.trim() || 'PC',
   });
   return true;
 }

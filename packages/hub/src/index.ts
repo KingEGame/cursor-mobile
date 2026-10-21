@@ -3,6 +3,7 @@ import { createHubContext, loadConfig } from "./config.js";
 
 export { createApp } from "./app.js";
 export { detectTailscaleIp, isTailscaleIp } from "./mesh-host.js";
+export { PairAttemptLimiter } from "./pair-limiter.js";
 export { createHubServer } from "./server.js";
 export {
   createHubContext,

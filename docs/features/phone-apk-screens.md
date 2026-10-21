@@ -65,28 +65,30 @@ flowchart LR
 
 ## 1. Pair
 
-**Purpose:** One-time (or re-pair) trust between phone and this PC Hub.
+**Purpose:** One-time (or re-pair) trust between the phone and **one PC Hub**. A phone can pair with several PCs; each PC is paired once and the active one is chosen in **Account → Computer**.
 
 **Primary path (correct connect):**
 
-1. On the **PC**: Hub `POST /v1/pair/start` on **localhost only** → Hub shows a **QR** (`qrPayload` = `cursor-companion://pair?host=&port=&code=&pairId=` with Tailscale host).
-2. On the **phone**: **Scan QR** with the **camera** → auto-fills Hub + code → `pair/complete` over Tailscale → device token → Health.
+1. On the **PC**: open `http://127.0.0.1:8787/pair` (loopback-only Hub page) → QR for **that PC** (`qrPayload` = `cursor-companion://pair?host=&port=&code=&pairId=&name=&hub=` with the Tailscale host, the PC's display name and its stable `hubId`).
+2. On the **phone**: **Scan QR** → `pair/complete` over Tailscale → device token → Health. The phone shows "Pairing with `<PC name>`…" while it waits.
 
-**Shows (phone):**
+**Multi-PC rules (2026-10-21):**
 
-- Primary CTA: **Scan QR** (camera viewfinder).
-- Fallback: Hub URL + pair code / QR paste fields + **Pair with Hub**.
-- Short instructions: Hub running on PC; both on Tailscale; QR is shown on the computer.
-- PC identity label once paired (hostname or Hub name) — not a cloud account.
-- Link/secondary: open Health after success.
+- The QR host is used as-is. A QR that points at `127.0.0.1` (the PC found no Tailscale address) is an **error on the phone**, never silently replaced with the previously paired PC — that substitution is how a code from PC A used to reach PC B's Hub and fail with `PAIR_CODE_INVALID`.
+- `PAIR_CODE_INVALID` now says why (`details.reason`): `unknown_pair` (Hub restarted after the QR was shown, or the QR belongs to another PC), `code_mismatch`, `unknown_code` (manual typo / wrong PC address). The phone shows the Hub's sentence, which names the PC that answered.
+- **Saved computers** card on Pair: a phone sent to Pair by a 401 from one PC can tap another saved PC and go straight to Chats (after an authenticated reachability probe).
+- Manual entry asks for the **PC address shown on that PC's pair page** (never prefilled with the old PC); saved PCs are one-tap chips. The PC pair page prints the address + code in a "Type it on the phone instead" block.
+- Wrong codes are throttled per caller address (`429 RATE_LIMITED`, bucket `pair`, `Retry-After`).
 
-**Shows (PC operator):** Pairing QR + code + TTL (local Hub pair page / CLI) — never expose `pair/start` on Tailscale.
+**Shows (phone):** Back (when opened from Account), 3-step card, **Scan QR**, Saved computers, Tailscale steps (collapsed), **Enter code manually** (collapsed).
+
+**Shows (PC operator):** PC name, QR, countdown, manual address + code, status (waiting / paired / expired / **Hub restarted — new code** / Hub not responding), warning when no Tailscale address was found.
 
 **Does not show:** Cloud login, Cursor account OAuth, remote worker regions, CDP URL.
 
-**Empty / error:** Camera denied → Enter code; expired QR → new QR on PC; Hub unreachable / Tailscale down → actionable error, stay on Pair.
+**Empty / error:** Camera denied → Enter code; expired / used QR → New code on PC; Hub unreachable / Tailscale down → actionable error, stay on Pair.
 
-**Status:** Manual + deeplink **Implemented**; in-app camera scanner + PC QR display page **Planned**.
+**Status:** QR scan, PC pair page, multi-PC Saved computers, reason-specific errors **Implemented** (2026-10-21).
 
 ## 2. Health
 
@@ -187,7 +189,7 @@ flowchart TB
 **Shows:**
 
 1. **Connection** — status (Online/Degraded/Offline/Pair); short “how it works” (Phone ↔ Tailscale ↔ Hub on PC ↔ Cursor; CDP stays on PC).
-2. **Computer** — dropdown to **choose one PC Hub** (saved Tailscale/paired endpoints). One active PC at a time. Bound project path from that Hub.
+2. **Computer** — list of **saved PCs** (name from the Hub = hostname by default, address, live reachability: Online / Unreachable / Needs re-pair), tap to switch (only after that PC answers an authenticated call), **×** to forget a non-active PC, **Add another PC** → Pair. One active PC at a time; same PC matched by `hubId` when its Tailscale address changes. Bound project path from that Hub.
 3. **Sync** — **Refresh now** immediately reloads `/health` + `/workspace` + `/sessions` so Home chats/projects match that computer; shows last synced time.
 4. **Advanced** — Health details, Browse PC files, Re-pair / Clear pairing, optional pending-approvals note.
 

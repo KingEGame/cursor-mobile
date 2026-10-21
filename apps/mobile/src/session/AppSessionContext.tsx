@@ -38,6 +38,7 @@ const initial: AppSession = {
   deviceToken: null,
   deviceId: null,
   hubDisplayName: null,
+  hubId: null,
   health: null,
   workspace: null,
   healthLevel: 'unknown',
@@ -55,6 +56,7 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
       deviceToken: pairing.deviceToken,
       deviceId: pairing.deviceId,
       hubDisplayName: pairing.hubDisplayName,
+      hubId: pairing.hubId,
       bootstrapped: true,
     }));
   }, []);
@@ -83,6 +85,7 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
       deviceToken: null,
       deviceId: null,
       hubDisplayName: null,
+      hubId: null,
       health: null,
       workspace: null,
       healthLevel: 'unknown' as HealthDotLevel,

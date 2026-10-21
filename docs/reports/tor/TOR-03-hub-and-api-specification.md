@@ -373,18 +373,21 @@ Auth column: `public` = no Bearer · `paired` = Bearer required · `local` = PC 
   "tokenType": "Bearer",
   "expiresAt": null,
   "hub": {
-    "displayName": "Desk PC",
-    "baseUrlHint": "http://pc.tailnet.ts.net:8787"
+    "displayName": "KINGWARPC",
+    "baseUrlHint": "http://pc.tailnet.ts.net:8787",
+    "hubId": "6ebbfca4e190"
   }
 }
 ```
 
+`hub.displayName` defaults to the PC hostname (`HUB_DISPLAY_NAME` overrides); `hub.hubId` is a stable 12-hex id of that Hub install (hostname + data dir) so the phone keeps one Account → Computer entry per PC. Both also appear in `GET /v1/health` (`hub.displayName`, `hub.hubId`) and in the QR payload (`name=`, `hub=`).
+
 | Error code | HTTP | When |
 |------------|------|------|
-| `PAIR_CODE_INVALID` | 400 | Wrong code |
+| `PAIR_CODE_INVALID` | 400 | Wrong code. `details.reason` ∈ `unknown_pair` (pairId never issued by this process: Hub restarted or QR from another PC), `code_mismatch`, `unknown_code` (manual code matches nothing); message names the PC that answered |
 | `PAIR_CODE_EXPIRED` | 410 | TTL elapsed |
 | `PAIR_CODE_USED` | 409 | Single-use consumed |
-| `RATE_LIMITED` | 429 | Pair bucket |
+| `RATE_LIMITED` | 429 | Pair bucket: 8 wrong codes per caller address per 10 min; `Retry-After` header, `details.retryAfterSec` |
 
 ---
 

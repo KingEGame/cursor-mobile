@@ -10,6 +10,7 @@ const KEYS = {
   deviceToken: 'device_token',
   deviceId: 'device_id',
   hubDisplayName: 'hub_display_name',
+  hubId: 'hub_id',
 } as const;
 
 export interface PairingState {
@@ -17,6 +18,8 @@ export interface PairingState {
   deviceToken: string | null;
   deviceId: string | null;
   hubDisplayName: string | null;
+  /** Stable id of the active PC's Hub (Hub ≥ 0.1.8); null for older pairings. */
+  hubId: string | null;
 }
 
 /** Build-time default from EXPO_PUBLIC_HUB_URL / app.config extra. */
@@ -30,11 +33,12 @@ export function getDefaultHubUrl(): string {
 }
 
 export async function loadPairingState(): Promise<PairingState> {
-  const [storedUrl, deviceToken, deviceId, hubDisplayName] = await Promise.all([
+  const [storedUrl, deviceToken, deviceId, hubDisplayName, hubId] = await Promise.all([
     SecureStore.getItemAsync(KEYS.hubBaseUrl),
     SecureStore.getItemAsync(KEYS.deviceToken),
     SecureStore.getItemAsync(KEYS.deviceId),
     SecureStore.getItemAsync(KEYS.hubDisplayName),
+    SecureStore.getItemAsync(KEYS.hubId),
   ]);
 
   return {
@@ -42,6 +46,7 @@ export async function loadPairingState(): Promise<PairingState> {
     deviceToken,
     deviceId,
     hubDisplayName,
+    hubId: hubId?.trim() || null,
   };
 }
 
@@ -58,16 +63,19 @@ export async function savePairingSuccess(input: {
   deviceToken: string;
   deviceId: string;
   hubDisplayName: string;
+  hubId?: string | null;
 }): Promise<void> {
   const hubBaseUrl = normalizeHubBaseUrl(input.hubBaseUrl);
   if (!hubBaseUrl) {
     throw new Error('Hub base URL is required');
   }
+  const hubId = input.hubId?.trim() || null;
   await Promise.all([
     SecureStore.setItemAsync(KEYS.hubBaseUrl, hubBaseUrl),
     SecureStore.setItemAsync(KEYS.deviceToken, input.deviceToken),
     SecureStore.setItemAsync(KEYS.deviceId, input.deviceId),
     SecureStore.setItemAsync(KEYS.hubDisplayName, input.hubDisplayName),
+    hubId ? SecureStore.setItemAsync(KEYS.hubId, hubId) : SecureStore.deleteItemAsync(KEYS.hubId),
   ]);
   // Remember this PC so Account → Computer can switch back to it later.
   await rememberHub({
@@ -75,6 +83,7 @@ export async function savePairingSuccess(input: {
     deviceToken: input.deviceToken,
     deviceId: input.deviceId,
     hubDisplayName: input.hubDisplayName,
+    hubId,
   });
 }
 
@@ -83,5 +92,6 @@ export async function clearPairing(): Promise<void> {
     SecureStore.deleteItemAsync(KEYS.deviceToken),
     SecureStore.deleteItemAsync(KEYS.deviceId),
     SecureStore.deleteItemAsync(KEYS.hubDisplayName),
+    SecureStore.deleteItemAsync(KEYS.hubId),
   ]);
 }

@@ -6,7 +6,7 @@ import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, shell, Tr
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { fork } from "node:child_process";
 import { createSupervisor, initialStatus } from "./hub-supervisor.mjs";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -139,7 +139,8 @@ function applyDefaultEnv() {
   if (!process.env.HUB_PORT?.trim()) process.env.HUB_PORT = "8787";
   if (!process.env.CDP_URL?.trim()) process.env.CDP_URL = "http://127.0.0.1:9222";
   if (!process.env.HUB_DATA_DIR?.trim()) process.env.HUB_DATA_DIR = defaultDataDir();
-  if (!process.env.HUB_DISPLAY_NAME?.trim()) process.env.HUB_DISPLAY_NAME = "Desk PC";
+  // The phone lists PCs by this name (Account → Computer); the hostname tells two PCs apart.
+  if (!process.env.HUB_DISPLAY_NAME?.trim()) process.env.HUB_DISPLAY_NAME = hostname().split(".")[0] || "PC";
   mkdirSync(process.env.HUB_DATA_DIR, { recursive: true });
 }
 
