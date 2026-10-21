@@ -38,8 +38,14 @@ The Hub journal showed `POST /v1/pair/complete -> 400 PAIR_CODE_INVALID` from a 
 - Fresh code from `POST /v1/pair/start` → `201`, phone lands on Health, `healthy`, 8 devices paired.
 - Local Hub restarted: `/v1/health` reports `displayName: KINGWARPC`, `hubId: 6ebbfca4e190`; `/pair` shows the manual address `100.108.160.99:8787`.
 
+## Verified on device (Pixel 7, local 0.1.8 release build, R8-minified)
+- App boots, Chats lists 40 chats from **KINGWARPC** (name from the Hub, no longer "Desk PC").
+- Account → Computer: KINGWARPC · green dot · "Online · http://100.108.160.99:8787" · ✓ selected · **Add another PC**; app shows v0.1.8 (108).
+- Account → Add another PC → Pair: Back, 3-step card, Scan QR, **Saved computers** (KINGWARPC · current), Tailscale and manual entry collapsed.
+- Local universal release APK (4 ABIs) is ~104 MB; the signed CI artifact for `v0.1.8` is built on node1 (run 39549730373).
+
 ## Open gaps
-- New APK device run (Pair "Saved computers", Account computer card, R8 build) — see the final session notes; CI builds the signed 0.1.8 APK on tag `v0.1.8`.
+- Cross-PC switch (Pixel ↔ Windows laptop Hub) not exercised in this turn: the laptop was offline on the tailnet. The Samsung phone has not been re-paired yet.
 - Pair page codes still live in memory only; a Hub restart invalidates them by design (now explained to the operator).
 - Dark mode remains deferred (UI-SPEC F9).
 
