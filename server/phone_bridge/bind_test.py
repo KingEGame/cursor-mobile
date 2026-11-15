@@ -74,7 +74,7 @@ async def main():
     runner = Runner(store)
     port = 18099
     ad = PhoneBridgeAdapter(PlatformConfig(enabled=True, extra={"notify": False, 
-        "port": port, "host": "127.0.0.1", "db_path": str(TMP / "state.db"), "devices_path": str(TMP / "devices.json")}))
+        "port": port, "host": "127.0.0.1", "db_path": str(TMP / "state.db"), "devices_path": str(TMP / "devices.json"), "projects_path": str(TMP / "projects.json")}))
     ad.gateway_runner = runner
     events = []
 

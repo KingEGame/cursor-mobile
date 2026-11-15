@@ -59,7 +59,9 @@ async def main() -> int:
 
     cfg = PlatformConfig(enabled=True, extra={"notify": False, "port": PORT, "host": "127.0.0.1",
                                               "db_path": str(tmp / "state.db"),
-                                              "devices_path": str(tmp / "devices.json")})
+                                              "devices_path": str(tmp / "devices.json"), "projects_path": str(tmp / "projects.json")})
+    os.environ["PHONE_BRIDGE_PROJECTS_PATH"] = str(tmp / "projects.json")
+    os.environ["PHONE_BRIDGE_DB_PATH"] = str(tmp / "state.db")
     ad = PhoneBridgeAdapter(cfg)
     captured = []
     async def fake_handle(event):            # the real one would run the agent
@@ -118,6 +120,7 @@ async def main() -> int:
             check("unknown project -> 404", nc404.status == 404, str(nc404.status))
             from phone_bridge.adapter import _project_prompt_section, _is_home_channel_nag
             ad._chat_projects.set_session("smoke_proj_sid", "hub-app")
+            check("project choice stays in the test store", "smoke_proj_sid" in (tmp / "projects.json").read_text())
             sec = _project_prompt_section({"platform": "phone", "session_id": "smoke_proj_sid"})
             check("system-prompt section names the project folder", "Hub APP" in sec and "/data/projects/cursor_mobile" in sec, sec[:60])
             check("no section for other platforms / unknown chats",

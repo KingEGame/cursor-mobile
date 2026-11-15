@@ -63,8 +63,6 @@ REPLAY_LIMIT = 2000
 # Sessions that are internal plumbing, hidden from the phone list unless ?all=1.
 HIDDEN_SOURCES = ("subagent", "oneshot", "kanban")
 _TRUTHY = ("1", "true", "yes", "on")
-# The live adapter (one gateway process = one phone bridge); used by the prompt-section callback.
-_ACTIVE: Optional["PhoneBridgeAdapter"] = None
 
 
 def _truthy(value: Any) -> bool:
@@ -331,8 +329,6 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         self._notify_id: Optional[str] = None
         self._projects = ProjectIndex()
         self._chat_projects = ChatProjects(Path(extra.get("projects_path") or home / "phone_bridge" / "projects.json"))
-        global _ACTIVE
-        _ACTIVE = self
 
     # lifecycle ------------------------------------------------------------
     async def connect(self, *, is_reconnect: bool = False) -> bool:
@@ -1008,16 +1004,26 @@ def _is_home_channel_nag(content: Optional[str]) -> bool:
 
 
 def _project_prompt_section(info: Any) -> str:
-    """Frozen into each NEW phone session's system prompt: which project the chat was started in."""
-    ad = _ACTIVE
-    if ad is None or str(info.get("platform") or "") != "phone":
+    """Frozen into each NEW phone session's system prompt: which project the chat was started in.
+
+    Must not rely on module globals: Hermes may import this plugin several times (per-profile module names,
+    hot reload evicts and re-executes it), so the instance holding the live adapter is not necessarily the
+    one whose callback got registered. Everything is read from the files the adapter writes."""
+    if str(info.get("platform") or "") != "phone":
         return ""
     sid = str(info.get("session_id") or "")
-    slug = ad._chat_projects.session(sid)
+    if not sid:
+        return ""
+    home = _hermes_home()
+    store = ChatProjects(Path(os.environ.get("PHONE_BRIDGE_PROJECTS_PATH") or home / "phone_bridge" / "projects.json"))
+    slug = store.session(sid)
     if not slug:
-        row = ad._state.session_row(sid) if sid else None
-        slug = ad._chat_projects.chat(row["chat_id"]) if row else None
-    p = ad._projects.get(slug)
+        try:
+            row = StateReader(Path(os.environ.get("PHONE_BRIDGE_DB_PATH") or home / "state.db")).session_row(sid)
+        except Exception:
+            row = None
+        slug = store.chat(row["chat_id"]) if row else None
+    p = ProjectIndex().get(slug) if slug else None
     return prompt_section(p) if p else ""
 
 

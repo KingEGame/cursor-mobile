@@ -57,7 +57,7 @@ async def main() -> None:
     cfg.sessions_dir = TMP / "sessions"; cfg.sessions_dir.mkdir(exist_ok=True)
     runner = Runner(SessionStore(cfg.sessions_dir, cfg))
     ad = PhoneBridgeAdapter(PlatformConfig(enabled=True, extra={"notify": False, 
-        "port": PORT, "host": "127.0.0.1", "db_path": str(DB), "devices_path": str(TMP / "devices.json")}))
+        "port": PORT, "host": "127.0.0.1", "db_path": str(DB), "devices_path": str(TMP / "devices.json"), "projects_path": str(TMP / "projects.json")}))
     ad.gateway_runner = runner
 
     async def fake_agent(event):
