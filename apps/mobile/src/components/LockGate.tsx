@@ -19,7 +19,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
       return;
     }
     setLocked(true);
-    if (await unlock(true, 'Unlock Cursor Mobile')) setLocked(false);
+    if (await unlock(true, 'Unlock Hermes Phone')) setLocked(false);
   }, []);
 
   useEffect(() => {

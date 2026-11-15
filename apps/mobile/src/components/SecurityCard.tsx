@@ -4,7 +4,7 @@ import { loadLockSettings, readDeviceAuth, saveLockSettings, unlock } from '../s
 import { DEFAULT_LOCK_SETTINGS, type LockSettings } from '../security/lock-policy';
 import { colors, radii, spacing, type, weight, lineHeight } from '../theme';
 
-/** Account → Security: fingerprint / PIN for approving tools and for opening the app. */
+/** Settings → Security: fingerprint / PIN before the app opens. */
 export function SecurityCard() {
   const [settings, setSettings] = useState<LockSettings>(DEFAULT_LOCK_SETTINGS);
   const [available, setAvailable] = useState(true);
@@ -24,14 +24,7 @@ export function SecurityCard() {
 
   return (
     <View style={styles.card} testID="account-security">
-      <Text style={styles.label}>Security</Text>
-      {/* Unlock-to-send paused — fingerprint on every send was too noisy. */}
-      <Row
-        title="Require unlock to approve tools"
-        meta="Fingerprint or PIN before the phone lets Cursor run a tool on your PC"
-        value={settings.lockApprove}
-        onChange={(v) => void change('lockApprove', v)}
-      />
+      {/* Hermes has no phone-side tool approvals, so the old "unlock to approve" switch is gone. */}
       <Row
         title="Lock app on open"
         meta="Ask again after 5 minutes in the background"
