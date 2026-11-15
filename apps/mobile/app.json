@@ -33,7 +33,7 @@
       "expo-secure-store"
     ],
     "extra": {
-      "hubUrl": "http://100.108.160.99:8787",
+      "hubUrl": "http://100.108.160.99:8097",
       "eas": {
         "projectId": "TODO-create-eas-project"
       }

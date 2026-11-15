@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { looksLikePath, truncateMiddle } from '../chat/format';
-import { parseMarkdown, type Block, type Span } from '../hub/markdown';
+import { parseMarkdown, type Block, type Span } from '../chat/markdown';
 import { colors, spacing, type, weight, lineHeight } from '../theme';
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });

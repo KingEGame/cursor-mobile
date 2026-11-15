@@ -1,0 +1,129 @@
+/**
+ * Live E2E: the app's real BridgeClient + BridgeSocket + mirror reducer against a running
+ * phone bridge (e2e_server.py). Usage: node --import tsx scripts/e2e-bridge.ts <baseUrl> <pairId> <code>
+ */
+import { BridgeClient, newClientMessageId } from '../src/bridge/client';
+import { applyEvent, emptyMirror, enqueue, markOutbox, setMessages, setSessions, type MirrorState } from '../src/bridge/mirror';
+import { BridgeSocket } from '../src/bridge/socket';
+import { buildTranscript } from '../src/bridge/format';
+
+const [baseUrl, pairId, code] = process.argv.slice(2);
+let failed = 0;
+const check = (name: string, ok: unknown, detail = '') => {
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? `  [${detail}]` : ''}`);
+  if (!ok) failed++;
+};
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function until(pred: () => boolean, ms = 10_000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (pred()) return true;
+    await sleep(100);
+  }
+  return false;
+}
+
+async function main() {
+  const anon = new BridgeClient({ baseUrl: baseUrl! });
+  const h = await anon.health();
+  check('health identifies a phone bridge', h.apiVersion === 1 && h.hub.hubId, h.hub.displayName);
+
+  const pair = await anon.pairComplete({ code: code!, pairId, deviceName: 'e2e', platform: 'node', appVersion: 'e2e' });
+  check('pairComplete returns a token', pair.deviceToken.length > 20);
+  const reuse = await anon
+    .pairComplete({ code: code!, pairId, deviceName: 'e2e', platform: 'node', appVersion: 'e2e' })
+    .then(() => 'accepted', (e) => e.code);
+  check('pair code is single-use', reuse === 'PAIR_CODE_INVALID', reuse);
+
+  const client = new BridgeClient({ baseUrl: baseUrl!, token: pair.deviceToken });
+  let st: MirrorState = emptyMirror;
+  const page = await client.sessions({ limit: 50 });
+  st = setSessions(st, page.items);
+  check('sessions list from real state.db', page.items.length > 0, `${page.items.length} sessions, sources=${[...new Set(page.items.map((s) => s.source))].join(',')}`);
+  const foreign = page.items.find((s) => s.source !== 'phone');
+  check('foreign sessions are read-only', foreign && foreign.canSend === false, foreign?.source);
+  if (foreign) {
+    const mp = await client.messages(foreign.id, { limit: 20 });
+    st = setMessages(st, foreign.id, mp.messages, mp.status);
+    check('read history of a PC session', mp.messages.length > 0 && typeof mp.messages[0]!.id === 'number', `${mp.messages.length} msgs`);
+  }
+
+  const states: string[] = [];
+  const sock = new BridgeSocket({
+    baseUrl: baseUrl!,
+    token: pair.deviceToken,
+    getSince: () => st.cursor,
+    onEvent: (ev) => {
+      st = applyEvent(st, ev);
+    },
+    onState: (s) => states.push(s),
+    backoffMinMs: 200,
+  });
+  sock.start();
+  check('websocket opens', await until(() => sock.getState() === 'open'), states.join('>'));
+
+  // New phone chat → agent run → live reply over WS.
+  const { chatId } = await client.newChat();
+  const text = `e2e ping ${Date.now()}`;
+  const id = newClientMessageId();
+  st = enqueue(st, { clientMessageId: id, chatId, text });
+  const sent = await client.send(chatId, text, id);
+  st = markOutbox(st, id, 'sent');
+  check('send accepted', sent.accepted && sent.messageId === id);
+  const dup = await client.send(chatId, text, id);
+  check('retry with same id is deduplicated', dup.duplicate === true);
+
+  let sid: string | null = null;
+  await until(() => {
+    void client.chatSession(chatId).then((r) => (sid = r.sessionId));
+    return sid != null;
+  });
+  check('chat resolves to a Hermes session', sid, sid ?? '');
+  // The mirror learns about the new session via needsSessionRefresh → list refetch.
+  await until(() => st.needsSessionRefresh || st.sessions.some((s) => s.id === sid), 5000);
+  st = setSessions(st, (await client.sessions({ limit: 50 })).items);
+  const s = st.sessions.find((x) => x.id === sid);
+  check('new session is phone + writable', s?.source === 'phone' && s.canSend === true);
+  const mp = await client.messages(sid!, {});
+  st = setMessages(st, sid!, mp.messages, mp.status);
+
+  check('status goes working', await until(() => st.sessions.find((x) => x.id === sid)?.status === 'working', 5000));
+  check('outbox cleared once the user message is in state.db', await until(() => st.outbox.length === 0, 5000), `${st.outbox.length} left`);
+  check(
+    'final reply streams in over WS',
+    await until(() => (st.messages[sid!] ?? []).some((m) => m.role === 'assistant' && m.content.includes(text)), 8000),
+  );
+  check('status returns to idle', await until(() => st.sessions.find((x) => x.id === sid)?.status === 'idle', 5000));
+  const tr = buildTranscript(st.messages[sid!] ?? []);
+  check(
+    'transcript = user, tools row, reply',
+    tr.map((t) => (t.kind === 'tools' ? 'tools' : t.message.role)).join(',') === 'user,tools,assistant',
+    tr.map((t) => t.kind === 'tools' ? `tools(${t.names})` : t.message.role).join(','),
+  );
+
+  // Reconnect replay: drop the socket, agent replies while we're away, reconnect with `since`.
+  sock.stop();
+  const cursorBefore = st.cursor;
+  const text2 = `while offline ${Date.now()}`;
+  await client.send(chatId, text2, newClientMessageId());
+  await sleep(2800); // agent finishes while we're disconnected
+  sock.start();
+  check(
+    'missed messages replayed after reconnect',
+    await until(() => (st.messages[sid!] ?? []).some((m) => m.content.includes(text2) && m.role === 'assistant'), 6000),
+    `cursor ${cursorBefore} → ${st.cursor}`,
+  );
+  sock.stop();
+
+  const bad = new BridgeClient({ baseUrl: baseUrl!, token: 'nope' });
+  const err = await bad.sessions().then(() => null, (e) => e);
+  check('bad token → unauthorized', err?.unauthorized === true);
+
+  console.log(failed ? `\n${failed} FAILED` : '\nALL PASSED');
+  process.exit(failed ? 1 : 0);
+}
+
+main().catch((e) => {
+  console.error('E2E crashed:', e);
+  process.exit(2);
+});
