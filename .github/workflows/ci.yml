@@ -1,10 +1,5 @@
 # Same release gate as the PC pre-push hook, on a clean checkout.
-# gate → android-apk + hub-desktop-{linux,win,mac} → release (tags v*).
-# Android + gate + linux/win Hub stay on node1 (self-hosted).
-# macOS Hub builds use GitHub-hosted macos-latest (build only — never run Hub sync).
-# Windows portable .exe is cross-built on node1 via electron-builder.# The phone never downloads from here directly: on the PC run
-#   npm run publish:apk:github
-# and the Hub serves that release over Tailscale (product lock: PC-local sync).
+# gate → android-apk → release (tags v*).
 name: CI
 
 on:
@@ -95,21 +90,14 @@ jobs:
           npx expo prebuild --platform android --no-install --clean
           cd android && ./gradlew --no-daemon assembleRelease
 
-      - name: Verify built APK (cleartext, install permission, versionCode)
+      - name: Verify built APK (cleartext, no installer permission, versionCode)
         run: |
-          code="$(node -e "import('./scripts/publish-apk-to-hub.mjs').then(m=>console.log(m.versionCodeFor(require('./apps/mobile/app.json').expo.version)))")"
-          node scripts/verify-apk.mjs apps/mobile/android/app/build/outputs/apk/release/app-release.apk --version-code "$code"
-
-      - name: Manifest for the Hub feed
-        run: |
-          node scripts/publish-apk-to-hub.mjs \
-            --apk apps/mobile/android/app/build/outputs/apk/release/app-release.apk \
-            --manifest-only --source github \
-            --tests-passed "${{ needs.gate.outputs.tests-passed }}" \
-            --ci-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          node scripts/verify-apk.mjs apps/mobile/android/app/build/outputs/apk/release/app-release.apk \
+            --version-code "$(node scripts/version-code.mjs)"
           mkdir -p dist-apk
-          apk="$(node -p "require('./apps/mobile/android/app/build/outputs/apk/release/latest.json').apkFile")"
-          cp "apps/mobile/android/app/build/outputs/apk/release/$apk" apps/mobile/android/app/build/outputs/apk/release/latest.json dist-apk/
+          v="$(node -p "require('./apps/mobile/app.json').expo.version")"
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "dist-apk/hermes-phone-$v.apk"
+          (cd dist-apk && sha256sum *.apk > SHA256SUMS)
 
       - uses: actions/upload-artifact@v4
         with:
@@ -117,129 +105,10 @@ jobs:
           path: dist-apk/
           retention-days: 30
 
-  hub-desktop-linux:
-    name: hub-desktop (linux AppImage)
-    needs: gate
-    runs-on: [self-hosted, node1]
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-
-      - name: Tag matches desktop version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          desk="$(node -p "require('./apps/desktop/package.json').version")"
-          if [ "v$desk" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} but apps/desktop/package.json version is $desk"
-            exit 1
-          fi
-
-      - name: Package Linux Hub desktop
-        run: node scripts/package-desktop.mjs --platform linux
-
-      - name: Smoke-test the packaged AppImage (health answers)
-        run: |
-          appimage="$(ls dist-desktop/*.AppImage | head -1)"
-          chmod +x "$appimage"
-          rc=0
-          if command -v xvfb-run >/dev/null; then
-            xvfb-run -a node scripts/smoke-desktop.mjs "$appimage" || rc=$?
-          else
-            node scripts/smoke-desktop.mjs "$appimage" || rc=$?
-          fi
-          if [ "$rc" -eq 78 ]; then echo "::warning::AppImage smoke test skipped (runner lacks GTK libraries)"; rc=0; fi
-          exit "$rc"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hub-desktop-linux
-          path: |
-            dist-desktop/*.AppImage
-            dist-desktop/SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 30
-
-  hub-desktop-win:
-    name: hub-desktop (windows portable exe)
-    needs: gate
-    # Cross-build on node1 (Linux) — portable exe works via electron-builder without
-    # a Windows runner, and avoids win32 npm.cmd spawn EINVAL under Actions.
-    runs-on: [self-hosted, node1]
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-
-      - name: Tag matches desktop version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          desk="$(node -p "require('./apps/desktop/package.json').version")"
-          if [ "v$desk" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} but apps/desktop/package.json version is $desk"
-            exit 1
-          fi
-
-      - name: Package Windows Hub desktop
-        run: node scripts/package-desktop.mjs --platform win
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hub-desktop-win
-          path: |
-            dist-desktop/*.exe
-            dist-desktop/SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 30
-
-  hub-desktop-mac:
-    name: hub-desktop (macOS zip)
-    needs: gate
-    runs-on: macos-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-
-      - name: Tag matches desktop version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          desk="$(node -p "require('./apps/desktop/package.json').version")"
-          if [ "v$desk" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} but apps/desktop/package.json version is $desk"
-            exit 1
-          fi
-
-      - name: Package macOS Hub desktop
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: node scripts/package-desktop.mjs --platform mac
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hub-desktop-mac
-          path: |
-            dist-desktop/*.zip
-            dist-desktop/SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 30
-
   release:
     name: release (tag)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [gate, android-apk, hub-desktop-linux, hub-desktop-win, hub-desktop-mac]
+    needs: [gate, android-apk]
     runs-on: [self-hosted, node1]
     permissions:
       contents: write
@@ -249,49 +118,11 @@ jobs:
         with:
           name: android-apk
           path: dist-apk
-      - uses: actions/download-artifact@v4
-        with:
-          name: hub-desktop-linux
-          path: dist-desktop
-      - uses: actions/download-artifact@v4
-        with:
-          name: hub-desktop-win
-          path: dist-desktop
-      - uses: actions/download-artifact@v4
-        with:
-          name: hub-desktop-mac
-          path: dist-desktop
-      - name: Combined SHA256SUMS
-        run: |
-          node --input-type=module -e '
-            import { writeSha256Sums, listReleaseArtifacts } from "./scripts/package-desktop.mjs";
-            const files = listReleaseArtifacts("dist-desktop");
-            if (files.length < 3) {
-              console.error("expected linux+win+mac artifacts, got", files);
-              process.exit(1);
-            }
-            await writeSha256Sums("dist-desktop", files);
-            console.log("SHA256SUMS for", files.join(", "));
-          '
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist-apk/* dist-desktop/* \
+          gh release create "$GITHUB_REF_NAME" dist-apk/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
-            --notes "Gate green · ${{ needs.gate.outputs.tests-passed }} tests · APK + latest.json (phone via PC Hub) · Hub desktop: Linux AppImage, Windows portable .exe, macOS zip (x64+arm64). Unsigned desktop binaries in v1."
-      - name: Mirror APK + latest.json to the public releases repo (phone downloads from there)
-        # Needs a fine-grained PAT (contents: write on KingEGame/cursor-mobile-releases) as secret RELEASES_REPO_TOKEN.
-        # Without it this step is skipped and the mirror is done by hand: see docs/reports.
-        env:
-          RELEASES_REPO_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
-        run: |
-          if [ -z "$RELEASES_REPO_TOKEN" ]; then
-            echo "::warning::RELEASES_REPO_TOKEN not set; phone GitHub feed not updated"
-            exit 0
-          fi
-          GH_TOKEN="$RELEASES_REPO_TOKEN" gh release create "$GITHUB_REF_NAME" dist-apk/* \
-            --repo KingEGame/cursor-mobile-releases \
-            --title "$GITHUB_REF_NAME" \
-            --notes "Cursor Mobile companion ${GITHUB_REF_NAME} (APK + manifest). Binaries only."
+            --notes "Gate green · ${{ needs.gate.outputs.tests-passed }} tests · Hermes Phone APK (pairs with the Hermes Gateway phone bridge)."

@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Cursor (phone companion)
-Comment=Start Cursor at login with loopback CDP so the Cursor Mobile phone app can reach it. Remove this file or turn it off in Startup Applications to stop.
-Exec=/usr/share/cursor/cursor --disable-gpu --disable-gpu-compositing --use-gl=swiftshader --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1
-Icon=co.anysphere.cursor
-X-GNOME-Autostart-enabled=true
-X-GNOME-Autostart-Delay=5
-NoDisplay=false

@@ -1,7 +1,0 @@
-{
-  "name": "cursor-hub",
-  "version": "0.1.0",
-  "description": "Drive Cursor Agents chats on this PC through the local cursor-mobile Hub (loopback only): list projects and chats, send prompts or start chats with mode/model/@files//rules, wait for the reply, stop, and review changed files.",
-  "author": { "name": "Ilian Damirov" },
-  "keywords": ["cursor", "hub", "agents", "pc-local"]
-}

@@ -41,7 +41,7 @@ async function main() {
   st = setSessions(st, page.items);
   check('sessions list from real state.db', page.items.length > 0, `${page.items.length} sessions, sources=${[...new Set(page.items.map((s) => s.source))].join(',')}`);
   const foreign = page.items.find((s) => s.source !== 'phone');
-  check('foreign sessions are read-only', foreign && foreign.canSend === false, foreign?.source);
+  check('PC sessions are writable from the phone', foreign && foreign.canSend === true, foreign?.source);
   if (foreign) {
     const mp = await client.messages(foreign.id, { limit: 20 });
     st = setMessages(st, foreign.id, mp.messages, mp.status);
@@ -66,7 +66,7 @@ async function main() {
   const { chatId } = await client.newChat();
   const text = `e2e ping ${Date.now()}`;
   const id = newClientMessageId();
-  st = enqueue(st, { clientMessageId: id, chatId, text });
+  st = enqueue(st, { clientMessageId: id, chatId, sessionId: null, text });
   const sent = await client.send(chatId, text, id);
   st = markOutbox(st, id, 'sent');
   check('send accepted', sent.accepted && sent.messageId === id);
@@ -114,6 +114,37 @@ async function main() {
     `cursor ${cursorBefore} → ${st.cursor}`,
   );
   sock.stop();
+
+  // Continue a session that was started on the PC (desktop/cli/telegram…), not on the phone.
+  if (foreign) {
+    sock.start();
+    await until(() => sock.getState() === 'open');
+    const fid = foreign.id;
+    const text3 = `continue from phone ${Date.now()}`;
+    const cid = newClientMessageId();
+    st = enqueue(st, { clientMessageId: cid, chatId: null, sessionId: fid, text: text3 });
+    const r3 = await client.sendToSession(fid, text3, cid);
+    st = markOutbox(st, cid, 'sent');
+    check('send into a PC session accepted', r3.accepted && r3.sessionId === fid, `${foreign.source} ${fid}`);
+    check(
+      'reply lands in THAT session (not a new one)',
+      await until(() => (st.messages[fid] ?? []).some((m) => m.role === 'assistant' && m.content.includes(text3)), 8000),
+    );
+    check('outbox for the PC session cleared', await until(() => st.outbox.length === 0, 3000));
+    const s3 = await client.session(fid);
+    // Same semantics as gateway /resume: the session now belongs to the route that resumed it.
+    check('session moved to the phone route (like /resume), id unchanged', s3.id === fid && s3.source === 'phone' && s3.canSend, `${foreign.source} → ${s3.source}`);
+    const busyText = `second ${Date.now()}`;
+    await client.sendToSession(fid, busyText, newClientMessageId());
+    await sleep(300);
+    const again = await client.sendToSession(fid, 'while working', newClientMessageId()).then(
+      (r) => `accepted ${r.accepted}`,
+      (e) => e.code,
+    );
+    check('phone may queue behind its own running turn', again.startsWith('accepted'), again);
+    await until(() => st.sessions.find((x) => x.id === fid)?.status === 'idle', 8000);
+    sock.stop();
+  }
 
   const bad = new BridgeClient({ baseUrl: baseUrl!, token: 'nope' });
   const err = await bad.sessions().then(() => null, (e) => e);

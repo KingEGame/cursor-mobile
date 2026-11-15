@@ -22,6 +22,12 @@ export function describeError(err: unknown, pcName?: string | null): string {
       case 'UNAUTHORIZED':
       case 'NOT_PAIRED':
         return `${pc} no longer accepts this phone. Pair again.`;
+      case 'SESSION_BUSY':
+        return `Hermes is still working in this session on ${pc}. Send again when it finishes.`;
+      case 'BIND_FAILED':
+        return `${pc} could not attach the phone to this session: ${err.message}`;
+      case 'SESSION_READ_ONLY':
+        return 'This is an internal session and cannot be continued.';
       case 'SESSION_NOT_FOUND':
         return 'This session no longer exists on the PC.';
       default:
@@ -32,11 +38,11 @@ export function describeError(err: unknown, pcName?: string | null): string {
   return String(err);
 }
 
-/** Parse what the PC pair page encodes: `cursor-companion://pair?hubUrl=…&code=…&pairId=…&name=…`. */
+/** Parse what the PC pair page encodes: `hermes-phone://pair?hubUrl=…&code=…&pairId=…&name=…`. */
 export function parsePairPayload(raw: string): { hubUrl?: string; code?: string; pairId?: string; name?: string } | null {
   const t = raw.trim();
   const q = t.indexOf('?');
-  if (!/^(cursor-companion|hermes-phone):\/\/\/?pair/i.test(t) || q < 0) {
+  if (!/^hermes-phone:\/\/\/?pair/i.test(t) || q < 0) {
     // Bare 8-digit code typed or scanned.
     const digits = t.replace(/\s+/g, '');
     return /^\d{8}$/.test(digits) ? { code: digits } : null;

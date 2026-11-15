@@ -35,7 +35,7 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
   const chatId = session?.chatId ?? route.params.chatId ?? null;
   const canSend = session ? session.canSend : Boolean(route.params.chatId);
   const messages = sessionId ? mirror.messages[sessionId] : undefined;
-  const pending = outboxFor(mirror, chatId);
+  const pending = outboxFor(mirror, sessionId ? null : chatId, sessionId);
 
   // A phone chat turns into a session once the Gateway picks up the first message.
   useEffect(() => {
@@ -74,10 +74,10 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
 
   const onSend = async () => {
     const text = draft.trim();
-    if (!text || !chatId) return;
+    if (!text || (!sessionId && !chatId)) return;
     setDraft('');
-    await bridge.send(chatId, text);
-    if (!sessionId && !resolving) {
+    await bridge.send(sessionId ? { sessionId } : { chatId }, text);
+    if (!sessionId && chatId && !resolving) {
       setResolving(true);
       const s = await bridge.resolveChat(chatId);
       setResolving(false);
@@ -127,6 +127,11 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
           />
         )}
 
+        {canSend && session && session.source !== 'phone' ? (
+          <Text style={styles.origin} numberOfLines={1}>
+            Continuing a {sourceLabel(session.source)} session · also on PC: {resumeCommand(session.id)}
+          </Text>
+        ) : null}
         {canSend ? (
           <View style={styles.composer}>
             <TextInput
@@ -151,7 +156,7 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
         ) : session ? (
           <View style={styles.readonly}>
             <Text style={styles.readonlyText}>
-              Started in {sourceLabel(session.source)} — read-only here. Continue on the PC with
+              Internal {sourceLabel(session.source)} session — read-only. Inspect on the PC with
             </Text>
             <Text selectable style={styles.cmd}>
               {resumeCommand(session.id)}
@@ -309,6 +314,15 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
     gap: 4,
+  },
+  origin: {
+    fontSize: 11,
+    color: colors.muted,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 4,
+    backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
   readonlyText: { fontSize: type.meta, color: colors.muted },
   cmd: {

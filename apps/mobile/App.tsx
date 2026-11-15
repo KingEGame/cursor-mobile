@@ -15,9 +15,9 @@ import { colors } from './src/theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-/** `cursor-companion://pair?hubUrl=…&code=…`, `…://session/<id>`, `…://sessions`. */
+/** `hermes-phone://pair?hubUrl=…&code=…`, `hermes-phone://session/<id>`, `hermes-phone://sessions`. */
 const linking: LinkingOptions<RootStackParamList> = {
-  prefixes: ['cursor-companion://', 'hermes-phone://'],
+  prefixes: ['hermes-phone://'],
   config: {
     screens: {
       Pair: 'pair',

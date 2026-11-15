@@ -9,6 +9,7 @@ import {
   enqueue,
   markOutbox,
   mergeMessages,
+  outboxFor,
   setMessages,
   setSessions,
   type MirrorState,
@@ -97,7 +98,7 @@ describe('mirror', () => {
   it('outbox: confirmed by a newer identical user message, not by an old one', () => {
     let st = setSessions(emptyMirror, [sess('s1', { chatId: 'c1' })]);
     st = setMessages(st, 's1', [msg(1, { role: 'user', content: 'ok' })]);
-    st = enqueue(st, { clientMessageId: 'a', chatId: 'c1', text: 'ok' });
+    st = enqueue(st, { clientMessageId: 'a', chatId: 'c1', sessionId: null, text: 'ok' });
     st = markOutbox(st, 'a', 'sent');
     st = setMessages(st, 's1', []); // reconcile pass: old "ok" (id 1) must not count
     assert.equal(st.outbox.length, 1);
@@ -105,10 +106,19 @@ describe('mirror', () => {
     assert.equal(st.outbox.length, 0);
   });
 
+  it('outbox: a message into a foreign (desktop) session reconciles by sessionId', () => {
+    let st = setSessions(emptyMirror, [sess('d1', { source: 'desktop', chatId: null })]);
+    st = setMessages(st, 'd1', [msg(1, { sessionId: 'd1', role: 'user', content: 'old' })]);
+    st = enqueue(st, { clientMessageId: 'a', chatId: null, sessionId: 'd1', text: 'from phone' });
+    assert.equal(outboxFor(st, null, 'd1').length, 1);
+    st = applyEvent(st, { type: 'message.created', sessionId: 'd1', message: msg(2, { sessionId: 'd1', role: 'user', content: 'from phone' }) });
+    assert.equal(st.outbox.length, 0);
+  });
+
   it('outbox: failed items stay until retried or discarded', () => {
     let st = setSessions(emptyMirror, [sess('s1', { chatId: 'c1' })]);
     st = setMessages(st, 's1', []);
-    st = enqueue(st, { clientMessageId: 'a', chatId: 'c1', text: 'hi' });
+    st = enqueue(st, { clientMessageId: 'a', chatId: 'c1', sessionId: null, text: 'hi' });
     st = markOutbox(st, 'a', 'failed', 'offline');
     st = applyEvent(st, { type: 'message.created', sessionId: 's1', message: msg(5, { role: 'user', content: 'hi' }) });
     assert.equal(st.outbox[0]!.state, 'failed');
@@ -139,6 +149,18 @@ describe('client', () => {
     assert.equal(seen.url, 'http://pc:8097/v1/chats/c1/messages');
     assert.equal((seen.init!.headers as Record<string, string>).Authorization, 'Bearer tok');
     assert.deepEqual(JSON.parse(String(seen.init!.body)), { text: 'hi', clientMessageId: 'x' });
+  });
+
+  it('continues any session through /v1/sessions/:id/messages', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    const c = new BridgeClient({
+      baseUrl: 'http://pc:8097',
+      token: 'tok',
+      fetchImpl: fakeFetch(202, { accepted: true, sessionId: 'd 1', messageId: 'x' }, seen) as typeof fetch,
+    });
+    const r = await c.sendToSession('d 1', 'go on', 'x');
+    assert.equal(seen.url, 'http://pc:8097/v1/sessions/d%201/messages');
+    assert.equal(r.sessionId, 'd 1');
   });
 
   it('maps gateway errors to BridgeError', async () => {
@@ -175,14 +197,16 @@ describe('errors & pairing payload', () => {
   it('explains failures in plain words', () => {
     assert.match(describeError(new BridgeError(0, 'UNREACHABLE', 'x'), 'kingwarpc'), /Tailscale.*kingwarpc/);
     assert.match(describeError(new BridgeError(400, 'PAIR_CODE_INVALID', 'x')), /127\.0\.0\.1:8097\/pair/);
+    assert.match(describeError(new BridgeError(409, 'SESSION_BUSY', 'x'), 'pc'), /still working.*pc/);
   });
   it('parses QR deep links and bare codes', () => {
     assert.deepEqual(
-      parsePairPayload('cursor-companion://pair?hubUrl=http%3A%2F%2F100.1.2.3%3A8097&code=12345678&pairId=ab&name=pc'),
+      parsePairPayload('hermes-phone://pair?hubUrl=http%3A%2F%2F100.1.2.3%3A8097&code=12345678&pairId=ab&name=pc'),
       { hubUrl: 'http://100.1.2.3:8097', code: '12345678', pairId: 'ab', name: 'pc' },
     );
     assert.deepEqual(parsePairPayload('1234 5678'), { code: '12345678' });
     assert.equal(parsePairPayload('https://example.com'), null);
+    assert.equal(parsePairPayload('cursor-companion://pair?code=12345678&host=x'), null, 'old Cursor Hub QR is not ours');
   });
 });
 

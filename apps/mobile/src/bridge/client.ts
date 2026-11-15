@@ -156,6 +156,14 @@ export class BridgeClient {
     return this.request('POST', `/v1/chats/${encodeURIComponent(chatId)}/messages`, { text, clientMessageId });
   }
 
+  /**
+   * Continue ANY session (PC terminal, desktop app, Telegram, …). The Gateway attaches a phone route
+   * to it like `/resume` and runs the turn there; 409 SESSION_BUSY while another client is mid-turn.
+   */
+  sendToSession(sessionId: string, text: string, clientMessageId: string): Promise<SendResponse> {
+    return this.request('POST', `/v1/sessions/${encodeURIComponent(sessionId)}/messages`, { text, clientMessageId });
+  }
+
   /** Which Hermes session a phone chat turned into (null until the agent picked it up). */
   chatSession(chatId: string): Promise<{ chatId: string; sessionId: string | null }> {
     return this.request('GET', `/v1/chats/${encodeURIComponent(chatId)}/session`);

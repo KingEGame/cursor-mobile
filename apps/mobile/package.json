@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && node --import tsx --test src/bridge/bridge.test.ts src/chat/format.test.ts src/chat/markdown.test.ts src/security/lock-policy.test.ts",
-    "smoke": "npm run typecheck"
+    "smoke": "npm run typecheck",
+    "e2e": "bash scripts/e2e-bridge.sh"
   },
   "dependencies": {
     "@react-navigation/native": "^7.1.17",
@@ -19,10 +20,6 @@
     "expo-build-properties": "~57.0.22",
     "expo-camera": "~57.0.6",
     "expo-constants": "~57.0.19",
-    "expo-file-system": "~57.0.7",
-    "expo-image-manipulator": "~57.0.20",
-    "expo-image-picker": "~57.0.20",
-    "expo-intent-launcher": "~57.0.1",
     "expo-local-authentication": "~57.0.3",
     "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",

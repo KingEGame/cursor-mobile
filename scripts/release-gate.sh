@@ -3,7 +3,6 @@
 # Run by .githooks/pre-push and by CI (GATE_CI=1). Manual: npm run gate
 #
 # Steps stop at the first red one; later steps are reported as skipped.
-# GATE_FULL=1 also runs the live checks that need main Cursor (CDP) on this PC.
 # Full output: .gate/last-run.log
 set -uo pipefail
 
@@ -16,23 +15,13 @@ LOG=".gate/last-run.log"
 if [ -t 1 ]; then G=$'\e[32m'; R=$'\e[31m'; D=$'\e[2m'; B=$'\e[1m'; N=$'\e[0m'; else G=; R=; D=; B=; N=; fi
 
 STEPS=(
-  "build:packages|npm run build"
-  # Hub (all of test/ + tests/phase0..4 + TOR-08), both adapters, and the Claude MCP server.
-  "test:hub+adapters+mcp|npm test"
-  # Mobile: tsc --noEmit + node:test suites.
-  "test:mobile|npm run test:mobile"
-  # Desktop Hub supervisor (backoff / status mapping / restart) — pure logic, no Electron needed.
-  "test:desktop-supervisor|node --test apps/desktop/hub-supervisor.test.mjs apps/desktop/updater.test.mjs apps/desktop/heartbeat.test.mjs"
+  # Mobile: tsc --noEmit + node:test suites (bridge client, mirror, format, markdown, lock policy).
+  "test:mobile|npm test"
   "test:release-scripts|node --test scripts/release-scripts.test.mjs"
-  # The Claude plugin ships a bundled copy of packages/mcp; it must match the source.
-  "plugin:bundle-fresh|git diff --quiet -- claude-plugin/cursor-hub/server || { echo 'claude-plugin bundle is stale: commit the output of npm run plugin:build'; exit 1; }"
 )
-# Needs the real Cursor window / processes on this PC — never in CI.
-if [ "${GATE_CI:-0}" != "1" ]; then
-  STEPS+=("assert:no-second-cdp|npm run assert:no-second-cdp")
-fi
-if [ "${GATE_FULL:-0}" = "1" ]; then
-  STEPS+=("verify:cdp|npm run verify:cdp")
+# Live client ↔ bridge E2E needs the Hermes checkout + its venv on this PC — never in CI.
+if [ "${GATE_CI:-0}" != "1" ] && [ -d "$HOME/.hermes/plugins/phone_bridge" ]; then
+  STEPS+=("e2e:bridge|npm run e2e")
 fi
 
 echo "${D}release gate · $(git rev-parse --short HEAD 2>/dev/null || echo '?') · log: $LOG${N}"

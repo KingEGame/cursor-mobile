@@ -23,6 +23,12 @@ import { describeError } from './errors';
 
 export type Connection = 'unpaired' | 'connecting' | 'online' | 'offline' | 'revoked';
 
+/** Existing session (any source) wins; a bare chatId is a new phone chat with no session yet. */
+export interface SendTarget {
+  sessionId?: string | null;
+  chatId?: string | null;
+}
+
 interface BridgeApi {
   ready: boolean;
   pairing: Pairing;
@@ -41,7 +47,7 @@ interface BridgeApi {
   openSession: (sessionId: string) => Promise<void>;
   closeSession: (sessionId: string) => void;
   newChat: () => Promise<string>;
-  send: (chatId: string, text: string) => Promise<void>;
+  send: (target: SendTarget, text: string) => Promise<void>;
   retry: (clientMessageId: string) => Promise<void>;
   discard: (clientMessageId: string) => void;
   /** Wait until a phone chat has become a Hermes session (first agent pickup). */
@@ -238,9 +244,11 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
   const newChat = useCallback(async () => (await client.newChat()).chatId, [client]);
 
   const deliver = useCallback(
-    async (chatId: string, text: string, id: string) => {
+    async (target: SendTarget, text: string, id: string) => {
       try {
-        await client.send(chatId, text, id);
+        if (target.sessionId) await client.sendToSession(target.sessionId, text, id);
+        else if (target.chatId) await client.send(target.chatId, text, id);
+        else throw new Error('Nothing to send to');
         update((s) => markOutbox(s, id, 'sent'));
       } catch (err) {
         update((s) => markOutbox(s, id, 'failed', describeError(err, pairing.pcName)));
@@ -251,12 +259,14 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
   );
 
   const send = useCallback(
-    async (chatId: string, text: string) => {
+    async (target: SendTarget, text: string) => {
       const t = text.trim();
       if (!t) return;
       const id = newClientMessageId();
-      update((s) => enqueue(s, { clientMessageId: id, chatId, text: t }));
-      await deliver(chatId, t, id);
+      const sessionId = target.sessionId ?? null;
+      const chatId = sessionId ? null : (target.chatId ?? null);
+      update((s) => enqueue(s, { clientMessageId: id, chatId, sessionId, text: t }));
+      await deliver({ sessionId, chatId }, t, id);
     },
     [update, deliver],
   );
@@ -265,8 +275,9 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     async (id: string) => {
       const item = mirrorRef.current.outbox.find((o) => o.clientMessageId === id);
       if (!item) return;
-      update((s) => enqueue(s, { clientMessageId: id, chatId: item.chatId, text: item.text }));
-      await deliver(item.chatId, item.text, id); // same id → Gateway drops it if the first try landed
+      update((s) => enqueue(s, { clientMessageId: id, chatId: item.chatId, sessionId: item.sessionId, text: item.text }));
+      // same id → Gateway drops it if the first try landed
+      await deliver({ sessionId: item.sessionId, chatId: item.chatId }, item.text, id);
     },
     [update, deliver],
   );

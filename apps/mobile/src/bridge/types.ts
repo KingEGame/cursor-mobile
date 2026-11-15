@@ -85,7 +85,8 @@ export interface PairCompleteResponse {
 export interface SendResponse {
   accepted: boolean;
   duplicate?: boolean;
-  chatId: string;
+  chatId?: string;
+  sessionId?: string;
   messageId: string;
 }
 

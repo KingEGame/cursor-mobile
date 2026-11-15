@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Refuse to publish an APK that would break the phone. Checks the BUILT file
+ * Refuse to ship an APK that would break the phone. Checks the BUILT file
  * (aapt2), not the config: a release once shipped without cleartext and could
- * no longer reach the Hub — and therefore could not self-update out of it.
+ * no longer reach the PC over Tailscale HTTP.
  *
  *   node scripts/verify-apk.mjs <apk> [--version-code N]
  *
@@ -28,13 +28,13 @@ export function checkApkDump({ badging, manifestTree }, expectedVersionCode) {
   if (!/uses-permission: name='android\.permission\.INTERNET'/.test(badging)) {
     problems.push("missing INTERNET permission");
   }
-  if (!/uses-permission: name='android\.permission\.REQUEST_INSTALL_PACKAGES'/.test(badging)) {
-    problems.push("missing REQUEST_INSTALL_PACKAGES (self-update cannot open the installer)");
+  if (/uses-permission: name='android\.permission\.REQUEST_INSTALL_PACKAGES'/.test(badging)) {
+    problems.push("REQUEST_INSTALL_PACKAGES is back — the app has no self-updater any more");
   }
   // xmltree prints either `usesCleartextTraffic(0x010104ec)=(type 0x12)0xffffffff`
   // (older aapt2) or `usesCleartextTraffic(0x010104ec)=true` (build-tools 36).
   if (!/usesCleartextTraffic\([^)]*\)=(?:\(type 0x12\)0xffffffff|true)\b/.test(manifestTree)) {
-    problems.push("usesCleartextTraffic is not true — the app could not reach the Hub over Tailscale HTTP");
+    problems.push("usesCleartextTraffic is not true — the app could not reach the Hermes bridge over Tailscale HTTP");
   }
   return problems;
 }

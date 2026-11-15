@@ -25,20 +25,33 @@ export function defaultBaseUrl(): string {
   return v && !v.includes('${') ? normalizeBaseUrl(v) : '';
 }
 
+/** Cursor Hub (≤ 0.1.x) paired against :8787 — that token means nothing to the Hermes bridge. */
+export function isLegacyHubUrl(url: string | null | undefined): boolean {
+  return /:8787\/?$/.test((url ?? '').trim());
+}
+
 export async function loadPairing(): Promise<Pairing> {
-  const [baseUrl, token, deviceId, pcName, hubId] = await Promise.all([
+  const [storedUrl, storedToken, storedDeviceId, pcName, hubId] = await Promise.all([
     SecureStore.getItemAsync(KEYS.baseUrl),
     SecureStore.getItemAsync(KEYS.token),
     SecureStore.getItemAsync(KEYS.deviceId),
     SecureStore.getItemAsync(KEYS.pcName),
     SecureStore.getItemAsync(KEYS.hubId),
   ]);
+  let baseUrl = storedUrl;
+  let token = storedToken;
+  let deviceId = storedDeviceId;
+  if (isLegacyHubUrl(baseUrl)) {
+    // One-time migration from the Cursor Hub app: keep nothing that points at the old server.
+    await Promise.all(Object.values(KEYS).map((k) => SecureStore.deleteItemAsync(k)));
+    baseUrl = token = deviceId = null;
+  }
   return {
     baseUrl: normalizeBaseUrl(baseUrl || defaultBaseUrl()),
     token: token || null,
     deviceId: deviceId || null,
-    pcName: pcName || null,
-    hubId: hubId || null,
+    pcName: token ? pcName || null : null,
+    hubId: token ? hubId || null : null,
   };
 }
 

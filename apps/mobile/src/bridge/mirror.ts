@@ -8,7 +8,10 @@ export type OutboxState = 'sending' | 'sent' | 'failed';
 
 export interface OutboxItem {
   clientMessageId: string;
-  chatId: string;
+  /** New phone chat (no session yet) — or the phone chat of a phone session. */
+  chatId: string | null;
+  /** Existing session being continued (any source). */
+  sessionId: string | null;
   text: string;
   state: OutboxState;
   createdAt: number;
@@ -199,7 +202,7 @@ export function reconcileOutbox(st: MirrorState): MirrorState {
   const consumed = new Set<number>();
   const keep = st.outbox.filter((o) => {
     if (o.state === 'failed') return true;
-    const sid = chatToSession.get(o.chatId);
+    const sid = o.sessionId ?? (o.chatId ? chatToSession.get(o.chatId) : undefined);
     const msgs = sid ? st.messages[sid] : undefined;
     if (!msgs) return true;
     const users = msgs.filter((m) => m.role === 'user' && m.id > o.afterId && !consumed.has(m.id));
@@ -216,8 +219,10 @@ export function reconcileOutbox(st: MirrorState): MirrorState {
   return keep.length === st.outbox.length ? st : { ...st, outbox: keep };
 }
 
-export function outboxFor(st: MirrorState, chatId: string | null | undefined): OutboxItem[] {
-  return chatId ? st.outbox.filter((o) => o.chatId === chatId) : [];
+export function outboxFor(st: MirrorState, chatId: string | null | undefined, sessionId?: string | null): OutboxItem[] {
+  return st.outbox.filter(
+    (o) => (sessionId != null && o.sessionId === sessionId) || (chatId != null && o.chatId === chatId),
+  );
 }
 
 export function findSessionByChat(st: MirrorState, chatId: string): Session | undefined {
