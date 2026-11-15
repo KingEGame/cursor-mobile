@@ -238,7 +238,7 @@ describe('format', () => {
 
 describe('network', () => {
   it('classifies addresses', () => {
-    assert.equal(addressKind('http://192.168.12.66:8097'), 'lan');
+    assert.equal(addressKind('http://192.168.1.66:8097'), 'lan');
     assert.equal(addressKind('http://10.42.0.1:8097'), 'lan');
     assert.equal(addressKind('http://172.20.0.5:8097'), 'lan');
     assert.equal(addressKind('http://100.64.0.1:8097'), 'tailscale');
@@ -262,9 +262,9 @@ describe('network', () => {
     assert.equal(pickBest(ranked, new Set()), null);
   });
   it('scans only the private /24, skipping the phone itself', () => {
-    const h = subnetHosts('192.168.12.40');
+    const h = subnetHosts('192.168.1.40');
     assert.equal(h.length, 253);
-    assert.ok(!h.includes('192.168.12.40') && h.includes('192.168.12.66'));
+    assert.ok(!h.includes('192.168.1.40') && h.includes('192.168.1.66'));
     assert.deepEqual(subnetHosts('100.99.189.101'), [], 'never sweep the tailnet / carrier range');
     assert.deepEqual(subnetHosts(null), []);
   });

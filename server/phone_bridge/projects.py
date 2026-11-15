@@ -85,6 +85,9 @@ class ProjectIndex:
 
 
 def _load_projects() -> list[dict[str, Any]]:
+    fixture = os.environ.get("PHONE_BRIDGE_PROJECTS_FIXTURE")   # tests: JSON list instead of projects.db
+    if fixture:
+        return json.loads(Path(fixture).read_text())
     from hermes_cli import projects_db as pdb  # gateway process: always importable
 
     conn = pdb.connect()

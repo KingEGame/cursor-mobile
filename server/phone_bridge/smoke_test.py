@@ -103,31 +103,44 @@ async def main() -> int:
             m = await (await http.get(f"{base}/v1/sessions/{first['id']}/messages?limit=3", headers=H)).json()
             check("messages tail", 0 < len(m["messages"]) <= 3, f"{len(m['messages'])} msgs")
 
-            # ---- projects (real ~/.hermes/projects.db, read-only) ----------
+            # ---- projects (fixture: a real folder + a symlinked alias, like /data -> /mnt/data) ----
+            real_dir = tmp / "real" / "demo"; real_dir.mkdir(parents=True)
+            (tmp / "alias").symlink_to(tmp / "real")
+            alias_dir = str(tmp / "alias" / "demo")
+            fx = tmp / "projects_fixture.json"
+            fx.write_text(json.dumps([{"slug": "demo", "name": "Demo Project", "icon": None, "color": None,
+                                       "description": None, "path": alias_dir, "folders": [alias_dir]}]))
+            os.environ["PHONE_BRIDGE_PROJECTS_FIXTURE"] = str(fx)
+            ad._projects.invalidate()
+            dst.execute("INSERT INTO sessions (id, source, started_at, message_count, cwd) VALUES (?,?,?,0,?)",
+                        ("smoke_proj_cwd", "cli", time.time(), str(real_dir / "src")))
+            dst.execute("INSERT INTO messages (session_id, role, content, timestamp) VALUES (?,?,?,?)",
+                        ("smoke_proj_cwd", "user", "hi", time.time()))
+            dst.commit()
             pj = await (await http.get(f"{base}/v1/projects", headers=H)).json()
             slugs = {x["slug"]: x for x in pj["items"]}
-            check("projects listed from projects.db", "hub-app" in slugs and slugs["hub-app"]["path"], f"{len(slugs)} projects")
-            hub = await (await http.get(f"{base}/v1/sessions?project=hub-app&limit=50", headers=H)).json()
-            check("project filter matches /mnt/data vs /data spellings (realpath)",
-                  hub["items"] and all(i["project"]["slug"] == "hub-app" for i in hub["items"]), f"{len(hub['items'])} sessions")
-            check("project session count agrees with filter", slugs["hub-app"]["sessionCount"] == len(hub["items"]))
-            anyp = await (await http.get(f"{base}/v1/sessions?limit=50", headers=H)).json()
+            check("projects listed", "demo" in slugs and slugs["demo"]["path"] == alias_dir, f"{len(slugs)} projects")
+            hub = await (await http.get(f"{base}/v1/sessions?project=demo&limit=50", headers=H)).json()
+            check("project filter matches symlinked spellings (realpath)",
+                  [i["id"] for i in hub["items"]] == ["smoke_proj_cwd"], str([i["id"] for i in hub["items"]]))
+            check("project session count agrees with filter", slugs["demo"]["sessionCount"] == len(hub["items"]))
+            anyp = await (await http.get(f"{base}/v1/sessions?limit=200", headers=H)).json()
             check("plain list carries project tags", any(i.get("project") for i in anyp["items"]) and "_cwd" not in anyp["items"][0])
-            nc = await http.post(f"{base}/v1/chats", headers=H, json={"project": "hub-app"})
+            nc = await http.post(f"{base}/v1/chats", headers=H, json={"project": "demo"})
             ncj = await nc.json()
-            check("new chat inside a project", nc.status == 201 and ncj["project"]["slug"] == "hub-app")
+            check("new chat inside a project", nc.status == 201 and ncj["project"]["slug"] == "demo")
             nc404 = await http.post(f"{base}/v1/chats", headers=H, json={"project": "no-such-project"})
             check("unknown project -> 404", nc404.status == 404, str(nc404.status))
             from phone_bridge.adapter import _project_prompt_section, _is_home_channel_nag
-            ad._chat_projects.set_session("smoke_proj_sid", "hub-app")
+            ad._chat_projects.set_session("smoke_proj_sid", "demo")
             check("project choice stays in the test store", "smoke_proj_sid" in (tmp / "projects.json").read_text())
             sec = _project_prompt_section({"platform": "phone", "session_id": "smoke_proj_sid"})
-            check("system-prompt section names the project folder", "Hub APP" in sec and "/data/projects/cursor_mobile" in sec, sec[:60])
+            check("system-prompt section names the project folder", "Demo Project" in sec and alias_dir in sec, sec[:60])
             from phone_bridge.adapter import _pin_project_cwd
             from tools.terminal_tool import get_session_cwd, clear_session_cwd
             _pin_project_cwd(tool_name="terminal", args={}, task_id="smoke_proj_sid", session_id="smoke_proj_sid")
             pinned = get_session_cwd("smoke_proj_sid")
-            check("project session works in the project folder", pinned == slugs["hub-app"]["path"], str(pinned))
+            check("project session works in the project folder", pinned == alias_dir, str(pinned))
             clear_session_cwd("smoke_proj_sid")
             _pin_project_cwd(tool_name="terminal", args={}, task_id="other_sid", session_id="other_sid")
             check("other sessions keep their cwd", get_session_cwd("other_sid") is None)
