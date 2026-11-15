@@ -1,0 +1,177 @@
+"""End-to-end smoke test for the phone bridge. Runs against a COPY of state.db, never the live one.
+
+    <gateway venv python> ~/.hermes/plugins/phone_bridge/smoke_test.py
+"""
+import asyncio, json, os, shutil, sqlite3, sys, tempfile, time
+from pathlib import Path
+
+sys.path.insert(0, os.path.expanduser("~/.hermes/hermes-agent"))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # this checkout's server/
+
+import aiohttp
+from gateway.config import PlatformConfig
+from gateway.platform_registry import PlatformEntry, platform_registry
+from phone_bridge.adapter import PhoneBridgeAdapter, register
+
+
+class _Ctx:
+    """Registers the plugin exactly like PluginContext.register_platform (minus the manager bookkeeping)."""
+    def register_platform(self, name, label, adapter_factory, check_fn, validate_config=None,
+                          required_env=None, install_hint="", **kw):
+        platform_registry.register(PlatformEntry(
+            name=name, label=label, adapter_factory=adapter_factory, check_fn=check_fn,
+            validate_config=validate_config, required_env=required_env or [],
+            install_hint=install_hint, source="plugin", **kw))
+
+
+register(_Ctx())
+
+
+
+async def wait_event(ws, pred, timeout=8.0):
+    """First event satisfying pred; also returns every event seen (for diagnostics)."""
+    seen, end = [], time.time() + timeout
+    while time.time() < end:
+        try:
+            ev = await ws.receive_json(timeout=max(0.1, end - time.time()))
+        except asyncio.TimeoutError:
+            break
+        seen.append(ev)
+        if pred(ev):
+            return ev, seen
+    return None, seen
+
+PORT = 18097
+results: list[tuple[str, bool, str]] = []
+
+
+def check(name: str, ok: bool, detail: str = "") -> None:
+    results.append((name, bool(ok), detail))
+    print(("PASS " if ok else "FAIL ") + name + (f"  [{detail}]" if detail else ""))
+
+
+async def main() -> int:
+    tmp = Path(tempfile.mkdtemp(prefix="phone_bridge_smoke_"))
+    src = sqlite3.connect("file:" + os.path.expanduser("~/.hermes/state.db") + "?mode=ro", uri=True)
+    dst = sqlite3.connect(tmp / "state.db")
+    src.backup(dst); src.close()
+    dst.execute("PRAGMA journal_mode=WAL"); dst.commit()
+
+    cfg = PlatformConfig(enabled=True, extra={"port": PORT, "host": "127.0.0.1",
+                                              "db_path": str(tmp / "state.db"),
+                                              "devices_path": str(tmp / "devices.json")})
+    ad = PhoneBridgeAdapter(cfg)
+    captured = []
+    async def fake_handle(event):            # the real one would run the agent
+        captured.append(event)
+    ad.handle_message = fake_handle
+    check("connect()", await ad.connect())
+    base = f"http://127.0.0.1:{PORT}"
+    try:
+        async with aiohttp.ClientSession() as http:
+            h = await (await http.get(f"{base}/v1/health")).json()
+            check("health public", h["ok"] and h["pairing"]["required"])
+
+            r = await http.get(f"{base}/v1/sessions")
+            check("sessions without token -> 401", r.status == 401, str(r.status))
+
+            start = await (await http.post(f"{base}/v1/pair/start", json={})).json()
+            bad = await http.post(f"{base}/v1/pair/complete", json={"code": "00000000", "deviceName": "x"})
+            check("wrong pair code rejected", bad.status == 400, str(bad.status))
+            done = await (await http.post(f"{base}/v1/pair/complete", json={
+                "code": start["code"], "pairId": start["pairId"], "deviceName": "Pixel 7",
+                "platform": "android", "appVersion": "t"})).json()
+            tok = done["deviceToken"]; H = {"Authorization": f"Bearer {tok}"}
+            check("pair/complete issues token", bool(tok) and done["deviceId"].startswith("dev_"))
+            again = await http.post(f"{base}/v1/pair/complete", json={"code": start["code"], "deviceName": "y"})
+            check("pair code is one-time", again.status == 400, str(again.status))
+            check("devices.json is 0600", oct((tmp / "devices.json").stat().st_mode & 0o777) == "0o600",
+                  oct((tmp / "devices.json").stat().st_mode & 0o777))
+            check("token stored hashed", tok not in (tmp / "devices.json").read_text())
+
+            sess = await (await http.get(f"{base}/v1/sessions?limit=5", headers=H)).json()
+            check("sessions list returns items", len(sess["items"]) > 0, f"{len(sess['items'])} items")
+            first = sess["items"][0]
+            check("session has status/updatedAt/preview",
+                  first["status"] in ("working", "idle", "ended") and first["updatedAt"], first["status"])
+            hidden = [i for i in sess["items"] if i["source"] in ("subagent", "oneshot", "kanban")]
+            check("internal sources hidden by default", not hidden)
+
+            m = await (await http.get(f"{base}/v1/sessions/{first['id']}/messages?limit=3", headers=H)).json()
+            check("messages tail", 0 < len(m["messages"]) <= 3, f"{len(m['messages'])} msgs")
+
+            # ---- websocket: live push + status + replay -------------------
+            cursor0 = (await (await http.get(f"{base}/v1/health")).json())["cursor"]
+            ws = await http.ws_connect(f"{base}/v1/ws?access_token={tok}")
+            await ws.send_json({"type": "client.hello", "sessions": []})
+            hello = await ws.receive_json(timeout=5)
+            check("ws server.hello", hello["type"] == "server.hello" and hello["cursor"] >= cursor0)
+            snap = await ws.receive_json(timeout=5)
+            check("ws status.snapshot", snap["type"] == "status.snapshot")
+
+            sid = "smoke_session_1"
+            dst.execute("INSERT INTO sessions (id, source, chat_id, started_at, message_count) VALUES (?,?,?,?,0)",
+                        (sid, "phone", "p_smoke", time.time()))
+            dst.execute("INSERT INTO session_turn_leases (conversation_id, holder, acquired_at, expires_at) VALUES (?,?,?,?)",
+                        (sid, "smoke", time.time(), time.time() + 600))
+            dst.execute("INSERT INTO messages (session_id, role, content, timestamp) VALUES (?,?,?,?)",
+                        (sid, "user", "привет с телефона", time.time()))
+            dst.commit()
+            ad._wake.set()
+            ev_msg, seen1 = await wait_event(ws, lambda e: e["type"] == "message.created" and e["sessionId"] == sid)
+            check("ws pushes message.created from DB", ev_msg and ev_msg["message"]["content"] == "привет с телефона")
+            ev_w, more = await wait_event(ws, lambda e: e["type"] == "session.updated" and e["sessionId"] == sid) \
+                if not any(e["type"] == "session.updated" and e["sessionId"] == sid for e in seen1) else (
+                next(e for e in seen1 if e["type"] == "session.updated" and e["sessionId"] == sid), [])
+            check("ws pushes status=working while lease live", ev_w and ev_w["status"] == "working",
+                  str(ev_w and ev_w["status"]))
+
+            dst.execute("INSERT INTO messages (session_id, role, content, timestamp, finish_reason) VALUES (?,?,?,?,?)",
+                        (sid, "assistant", "готово", time.time(), "stop"))
+            dst.execute("UPDATE session_turn_leases SET expires_at = ? WHERE conversation_id = ?", (time.time() - 1, sid))
+            dst.commit(); ad._wake.set()
+            su, seen2 = await wait_event(ws, lambda e: e["type"] == "session.updated" and e["sessionId"] == sid
+                                                        and e["status"] == "idle")
+            check("ws pushes status=idle when turn finished", su is not None,
+                  "got: " + ",".join(f"{e['type']}:{e.get('sessionId','')[:12]}:{e.get('status','')}" for e in seen2[-5:]))
+            check("idle event carries last message", su and (su.get("lastMessage") or {}).get("content") == "готово")
+            await ws.close()
+
+            # replay: reconnect with an old cursor, must receive the 2 messages again
+            ws2 = await http.ws_connect(f"{base}/v1/ws?access_token={tok}")
+            await ws2.send_json({"type": "client.hello", "sessions": [sid], "since": cursor0})
+            replayed = []
+            for _ in range(6):
+                try:
+                    ev = await ws2.receive_json(timeout=1.5)
+                except asyncio.TimeoutError:
+                    break
+                if ev["type"] == "message.created" and ev.get("replay"):
+                    replayed.append(ev["message"]["content"])
+            check("reconnect replays missed messages via since", replayed == ["привет с телефона", "готово"], str(replayed))
+            await ws2.close()
+
+            # ---- phone -> agent ------------------------------------------
+            chat = (await (await http.post(f"{base}/v1/chats", headers=H, json={})).json())["chatId"]
+            r = await http.post(f"{base}/v1/chats/{chat}/messages", headers=H,
+                                json={"text": "что нового?", "clientMessageId": "c1"})
+            await asyncio.sleep(0.2)
+            check("send accepted 202", r.status == 202, str(r.status))
+            check("inbound event reaches gateway", len(captured) == 1 and captured[0].text == "что нового?"
+                  and captured[0].source.platform.value == "phone" and captured[0].source.chat_id == chat)
+            dup = await (await http.post(f"{base}/v1/chats/{chat}/messages", headers=H,
+                                         json={"text": "что нового?", "clientMessageId": "c1"})).json()
+            check("duplicate clientMessageId deduped", dup.get("duplicate") is True and len(captured) == 1)
+            await http.post(f"{base}/v1/chats/{chat}/messages", headers=H, json={"text": "/stop"})
+            await asyncio.sleep(0.2)
+            check("slash command passes through as COMMAND", captured[-1].message_type.value == "command",
+                  captured[-1].message_type.value)
+    finally:
+        await ad.disconnect()
+        shutil.rmtree(tmp, ignore_errors=True)
+    failed = [n for n, ok, _ in results if not ok]
+    print(f"\n{len(results) - len(failed)}/{len(results)} passed" + (f"; FAILED: {failed}" if failed else ""))
+    return 1 if failed else 0
+
+
+sys.exit(asyncio.run(main()))

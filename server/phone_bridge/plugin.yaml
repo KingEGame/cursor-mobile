@@ -1,0 +1,30 @@
+name: phone-bridge
+label: Phone Bridge
+kind: platform
+version: 0.1.0
+manifest_version: 1
+description: >
+  Two-way bridge between the Hermes gateway and the phone app (APK). Exposes a
+  token-authenticated REST + WebSocket API (/v1/*) on this PC. ~/.hermes/state.db
+  is the single source of truth: every session (CLI, desktop, Telegram, Discord,
+  phone) is visible to the phone with live status (working/idle) and a resumable
+  message cursor, and phone chats are ordinary Hermes sessions that can be resumed
+  from the PC (hermes --resume).
+author: local
+optional_env:
+  - name: PHONE_BRIDGE_ENABLED
+    description: "Enable the phone bridge platform (true/false)"
+    prompt: "Enable phone bridge?"
+    password: false
+  - name: PHONE_BRIDGE_PORT
+    description: "Listen port (default 8097)"
+    prompt: "Bridge port"
+    password: false
+  - name: PHONE_BRIDGE_HOST
+    description: "Listen address (default 0.0.0.0; use the Tailscale IP to restrict)"
+    prompt: "Bridge bind address"
+    password: false
+  - name: PHONE_BRIDGE_ALLOW_ALL_USERS
+    description: "Let paired phones talk to the agent (transport already requires a device token)"
+    prompt: "Allow paired phones? (true/false)"
+    password: false

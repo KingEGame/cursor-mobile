@@ -20,7 +20,7 @@ STEPS=(
   "test:release-scripts|node --test scripts/release-scripts.test.mjs"
 )
 # Live client ↔ bridge E2E needs the Hermes checkout + its venv on this PC — never in CI.
-if [ "${GATE_CI:-0}" != "1" ] && [ -d "$HOME/.hermes/plugins/phone_bridge" ]; then
+if [ "${GATE_CI:-0}" != "1" ] && [ -d "$HOME/.hermes/hermes-agent" ]; then
   STEPS+=("e2e:bridge|npm run e2e")
 fi
 

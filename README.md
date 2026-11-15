@@ -15,7 +15,7 @@ flowchart LR
 
 | Piece | Where |
 |------|------|
-| Server (Gateway platform plugin) | `~/.hermes/plugins/phone_bridge/` (`adapter.py`, `plugin.yaml`) |
+| Server (Gateway platform plugin) | `server/phone_bridge/` (installed into `~/.hermes/plugins/phone_bridge` by `scripts/install-bridge.sh`) |
 | App | `apps/mobile` (Expo / React Native) — `src/bridge/` core, screens Pair → Sessions → Chat → Settings |
 
 ## What works
@@ -34,6 +34,7 @@ flowchart LR
 On the PC:
 
 ```bash
+bash scripts/install-bridge.sh                         # links ~/.hermes/plugins/phone_bridge -> server/phone_bridge
 echo 'PHONE_BRIDGE_ENABLED=true' >> ~/.hermes/.env      # optional: PHONE_BRIDGE_PORT (8097)
 echo 'PHONE_BRIDGE_ALLOW_ALL_USERS=true' >> ~/.hermes/.env
 hermes plugins enable phone-bridge
@@ -53,7 +54,7 @@ npm run gate                  # what pre-push and CI run
 npm run release:apk           # prebuild --clean → signed release APK → dist-apk/
 ```
 
-Server tests (gateway venv python): `phone_bridge/smoke_test.py` (REST/WS/pairing) and
-`phone_bridge/bind_test.py` (continuing a non-phone session through the real `SessionStore`).
+Server tests (gateway venv python): `server/phone_bridge/smoke_test.py` (REST/WS/pairing) and
+`server/phone_bridge/bind_test.py` (continuing a non-phone session through the real `SessionStore`).
 
 `docs/` describes the earlier Cursor Hub design and is kept for history only.

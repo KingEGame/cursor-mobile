@@ -4,7 +4,7 @@ set -u
 PY=${HERMES_PY:-/home/kingwar/.hermes/installs/cec2c3a4299eff54/environments/0b0a3d193df1479da3932830a8ba32ff/venv/bin/python}
 PORT=${PORT:-18098}
 LOG=$(mktemp)
-"$PY" "$HOME/.hermes/plugins/phone_bridge/e2e_server.py" "$PORT" >"$LOG" 2>&1 &
+"$PY" "$(cd "$(dirname "$0")/../../.." && pwd)/server/phone_bridge/e2e_server.py" "$PORT" >"$LOG" 2>&1 &
 SRV=$!
 trap 'kill $SRV 2>/dev/null' EXIT
 for _ in $(seq 1 60); do grep -q '^PAIR' "$LOG" && break; sleep 0.5; done
