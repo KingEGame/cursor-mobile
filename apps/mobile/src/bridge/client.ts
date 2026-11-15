@@ -3,6 +3,8 @@
  */
 import type {
   Health,
+  PairRequestResponse,
+  PairRequestStatus,
   MessagesPage,
   PairCompleteRequest,
   PairCompleteResponse,
@@ -124,6 +126,14 @@ export class BridgeClient {
     return this.request('POST', '/v1/pair/complete', req, false);
   }
 
+  pairRequest(req: { deviceName: string; platform: string; appVersion: string }): Promise<PairRequestResponse> {
+    return this.request('POST', '/v1/pair/request', req, false);
+  }
+
+  pairRequestStatus(requestId: string): Promise<PairRequestStatus> {
+    return this.request('GET', `/v1/pair/request/${encodeURIComponent(requestId)}`, undefined, false);
+  }
+
   sessions(q: { limit?: number; before?: number | null; source?: string; all?: boolean } = {}): Promise<SessionsPage> {
     const qs = new URLSearchParams();
     if (q.limit) qs.set('limit', String(q.limit));
@@ -145,6 +155,11 @@ export class BridgeClient {
     if (q.after) qs.set('after', String(q.after));
     const s = qs.toString();
     return this.request('GET', `/v1/sessions/${encodeURIComponent(sessionId)}/messages${s ? `?${s}` : ''}`);
+  }
+
+  /** Disconnect this phone on the PC side too (token stops working). */
+  revokeSelf(): Promise<{ ok: boolean }> {
+    return this.request('POST', '/v1/device/revoke', {});
   }
 
   newChat(): Promise<{ chatId: string }> {

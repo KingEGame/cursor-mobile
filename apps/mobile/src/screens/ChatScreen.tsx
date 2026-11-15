@@ -15,12 +15,15 @@ import { ArrowUp, RotateCw, Wrench, X } from 'lucide-react-native';
 import { Markdown } from '../components/Markdown';
 import { useBridge } from '../bridge/BridgeProvider';
 import { buildTranscript, resumeCommand, sessionTitle, sourceLabel, toolsLabel, type ChatItem } from '../bridge/format';
-import { findSessionByChat, outboxFor, type OutboxItem } from '../bridge/mirror';
+import { findSessionByChat, liveFor, outboxFor, type LiveItem, type OutboxItem } from '../bridge/mirror';
 import type { ScreenProps } from '../navigation/types';
 import { formatMessageTime } from '../chat/format';
 import { colors, radii, spacing, type, weight } from '../theme';
 
-type Row = ChatItem | { kind: 'pending'; key: string; item: OutboxItem };
+type Row =
+  | ChatItem
+  | { kind: 'pending'; key: string; item: OutboxItem }
+  | { kind: 'live'; key: string; live: LiveItem };
 
 export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
   const bridge = useBridge();
@@ -36,6 +39,7 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
   const canSend = session ? session.canSend : Boolean(route.params.chatId);
   const messages = sessionId ? mirror.messages[sessionId] : undefined;
   const pending = outboxFor(mirror, sessionId ? null : chatId, sessionId);
+  const live = liveFor(mirror, chatId, sessionId);
 
   // A phone chat turns into a session once the Gateway picks up the first message.
   useEffect(() => {
@@ -67,10 +71,13 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
   const rows: Row[] = useMemo(() => {
     const base: Row[] = buildTranscript(messages ?? []);
     for (const item of pending) base.push({ kind: 'pending', key: `p${item.clientMessageId}`, item });
+    for (const l of live) if (l.text.trim()) base.push({ kind: 'live', key: `l${l.liveId}`, live: l });
     return base.reverse(); // inverted list: newest first
-  }, [messages, pending]);
+  }, [messages, pending, live]);
 
-  const working = session?.status === 'working' || (!session && pending.some((p) => p.state === 'sent'));
+  const streaming = live.some((l) => l.duringTurn && !l.final && l.text.trim());
+  const working =
+    !streaming && (session?.status === 'working' || (!session && pending.some((p) => p.state === 'sent')));
 
   const onSend = async () => {
     const text = draft.trim();
@@ -196,6 +203,22 @@ function RowView({
       </View>
     );
   }
+  if (row.kind === 'live') {
+    const l = row.live;
+    if (!l.duringTurn) {
+      return (
+        <View style={styles.notice}>
+          <Markdown source={l.text} />
+        </View>
+      );
+    }
+    return (
+      <View style={styles.assistant}>
+        <Markdown source={l.text} />
+        <Text style={styles.meta}>{l.final ? 'Saving…' : 'Typing…'}</Text>
+      </View>
+    );
+  }
   if (row.kind === 'pending') {
     const { item } = row;
     return (
@@ -264,6 +287,13 @@ const styles = StyleSheet.create({
   userText: { fontSize: type.body, color: colors.text, lineHeight: 22 },
   assistant: { gap: 2, paddingRight: spacing.lg },
   meta: { fontSize: 11, color: colors.muted },
+  notice: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginRight: spacing.lg,
+  },
   failRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, maxWidth: '85%' },
   failText: { flexShrink: 1, fontSize: 12, color: colors.dangerText },
   tools: {

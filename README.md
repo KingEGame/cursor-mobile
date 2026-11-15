@@ -27,6 +27,14 @@ flowchart LR
   mid-turn in that session the phone gets `409 SESSION_BUSY` instead of interleaving.
 - **Live + reconnect-safe.** Every message has a monotonically increasing id; after a drop the app
   sends `since` and the bridge replays what it missed. Sends are idempotent (`clientMessageId`).
+- **Live replies.** Answers stream onto the phone as the model writes them (gateway streaming, `edit`
+  transport), plus tool progress and slash-command output that never reaches `state.db`.
+- **No addresses to type.** At home the app finds the PC on the Wi-Fi; it remembers every address the PC
+  reports (Wi-Fi IP, Tailscale IP, MagicDNS) and uses the best reachable one — Wi-Fi with the VPN off at
+  home, Tailscale outside. It re-checks on reconnect and when the app comes to the foreground.
+- **One-tap pairing.** Tap the PC in the app → a notification + `http://127.0.0.1:8097/pair` show the
+  phone with a 4-digit code → **Allow**. The code/QR flow still works (e.g. over Tailscale only).
+  "Disconnect" in the app also revokes the token on the PC.
 - Gateway slash commands work from the phone (`/new`, `/stop`, `/model`, …).
 
 ## Set up
@@ -38,11 +46,18 @@ bash scripts/install-bridge.sh                         # links ~/.hermes/plugins
 echo 'PHONE_BRIDGE_ENABLED=true' >> ~/.hermes/.env      # optional: PHONE_BRIDGE_PORT (8097)
 echo 'PHONE_BRIDGE_ALLOW_ALL_USERS=true' >> ~/.hermes/.env
 hermes plugins enable phone-bridge
+hermes config set streaming.enabled true              # live replies; then keep other platforms as they were:
+hermes config set streaming.transport edit
+# for p in telegram discord slack …: hermes config set display.platforms.$p.streaming false
 systemctl --user restart hermes-gateway                # or: hermes gateway restart
 ```
 
-Open `http://127.0.0.1:8097/pair` **on the PC**, then in the app enter the address + 8-digit code
-or scan the QR (deep link `hermes-phone://pair?...`).
+Streaming in Hermes is one global switch that per-platform settings can only narrow, so enabling it for
+the phone means explicitly turning it off for every other platform (done on this PC; backup:
+`~/.hermes/config.yaml.bak-phone-stream`).
+
+In the app tap your PC under **On this Wi-Fi** and press **Allow** on the PC. Away from home: open
+`http://127.0.0.1:8097/pair` on the PC and scan the QR / type the 8-digit code (deep link `hermes-phone://pair?...`).
 
 ## Develop
 

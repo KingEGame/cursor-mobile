@@ -35,7 +35,22 @@ async function main() {
     .then(() => 'accepted', (e) => e.code);
   check('pair code is single-use', reuse === 'PAIR_CODE_INVALID', reuse);
 
-  const client = new BridgeClient({ baseUrl: baseUrl!, token: pair.deviceToken });
+  check('health lists phone addresses', Array.isArray(h.hub.addresses) && h.pairing.oneTap === true, (h.hub.addresses ?? []).join(' '));
+
+  // One-tap pairing: phone asks, the PC owner allows on http://127.0.0.1/pair (local POST here).
+  const ask = await anon.pairRequest({ deviceName: 'e2e-phone', platform: 'node', appVersion: 'e2e' });
+  check('one-tap request gives a confirm code', /^\d{4}$/.test(ask.confirm), ask.confirm);
+  const pend = await anon.pairRequestStatus(ask.requestId);
+  check('waits for the PC owner', pend.status === 'pending');
+  const listed = (await (await fetch(`${baseUrl}/pair/requests`)).json()) as { items: { id: string; confirm: string }[] };
+  check('PC page shows the same code', listed.items.some((x) => x.id === ask.requestId && x.confirm === ask.confirm));
+  const allow = await fetch(`${baseUrl}/pair/requests/${ask.requestId}/approve`, { method: 'POST' });
+  check('owner allows', allow.status === 200, String(allow.status));
+  const got = await anon.pairRequestStatus(ask.requestId);
+  check('phone receives its token', got.status === 'approved' && 'deviceToken' in got && got.deviceToken.length > 20);
+  const oneTapToken = got.status === 'approved' ? got.deviceToken : '';
+
+  const client = new BridgeClient({ baseUrl: baseUrl!, token: oneTapToken });
   let st: MirrorState = emptyMirror;
   const page = await client.sessions({ limit: 50 });
   st = setSessions(st, page.items);
@@ -51,7 +66,7 @@ async function main() {
   const states: string[] = [];
   const sock = new BridgeSocket({
     baseUrl: baseUrl!,
-    token: pair.deviceToken,
+    token: oneTapToken,
     getSince: () => st.cursor,
     onEvent: (ev) => {
       st = applyEvent(st, ev);
@@ -88,12 +103,21 @@ async function main() {
   st = setMessages(st, sid!, mp.messages, mp.status);
 
   check('status goes working', await until(() => st.sessions.find((x) => x.id === sid)?.status === 'working', 5000));
+  let peak = '';
+  const streamed = await until(() => {
+    const l = st.live.find((x) => x.chatId === chatId);
+    if (l && l.text.length > peak.length) peak = l.text;
+    return peak.length > '**echo:**'.length + 3;
+  }, 6000);
+  check('reply streams live before it is saved', streamed, peak);
   check('outbox cleared once the user message is in state.db', await until(() => st.outbox.length === 0, 5000), `${st.outbox.length} left`);
   check(
     'final reply streams in over WS',
     await until(() => (st.messages[sid!] ?? []).some((m) => m.role === 'assistant' && m.content.includes(text)), 8000),
   );
   check('status returns to idle', await until(() => st.sessions.find((x) => x.id === sid)?.status === 'idle', 5000));
+  check('live preview replaced by the saved message', await until(() => !st.live.some((x) => x.chatId === chatId), 3000),
+    `${st.live.length} left`);
   const tr = buildTranscript(st.messages[sid!] ?? []);
   check(
     'transcript = user, tools row, reply',
@@ -147,6 +171,7 @@ async function main() {
   }
 
   const bad = new BridgeClient({ baseUrl: baseUrl!, token: 'nope' });
+  void pair; // code pairing token stays valid alongside the one-tap one
   const err = await bad.sessions().then(() => null, (e) => e);
   check('bad token → unauthorized', err?.unauthorized === true);
 

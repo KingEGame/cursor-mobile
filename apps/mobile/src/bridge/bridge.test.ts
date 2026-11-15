@@ -15,6 +15,8 @@ import {
   type MirrorState,
 } from './mirror';
 import { helloFrame } from './socket';
+import { addressKind, mergeAddresses, pickBest, pool, rankAddresses, subnetHosts } from './network';
+import { liveFor, stripCursor } from './mirror';
 import type { Message, Session } from './types';
 
 const msg = (id: number, over: Partial<Message> = {}): Message => ({
@@ -231,5 +233,119 @@ describe('format', () => {
     assert.equal(sessionTitle({ id: 'x', title: 'x', preview: '**Fix** the bug' }), 'Fix the bug');
     assert.equal(relativeTime(new Date(Date.now() - 5 * 60_000).toISOString()), '5m');
     assert.equal(relativeTime(null), '');
+  });
+});
+
+describe('network', () => {
+  it('classifies addresses', () => {
+    assert.equal(addressKind('http://192.168.12.66:8097'), 'lan');
+    assert.equal(addressKind('http://10.42.0.1:8097'), 'lan');
+    assert.equal(addressKind('http://172.20.0.5:8097'), 'lan');
+    assert.equal(addressKind('http://100.108.160.99:8097'), 'tailscale');
+    assert.equal(addressKind('http://kingwarpc-1.tail246b3f.ts.net:8097'), 'name');
+    assert.equal(addressKind('http://8.8.8.8:8097'), 'name');
+  });
+  it('ranks LAN → Tailscale IP → MagicDNS and dedupes', () => {
+    assert.deepEqual(
+      rankAddresses(['http://pc.ts.net:8097', 'http://100.101.2.3:8097/', 'http://192.168.1.5:8097', 'http://100.101.2.3:8097']),
+      ['http://192.168.1.5:8097', 'http://100.101.2.3:8097', 'http://pc.ts.net:8097'],
+    );
+    assert.deepEqual(mergeAddresses(['http://100.101.2.3:8097'], null, ['http://192.168.1.5:8097']), [
+      'http://192.168.1.5:8097',
+      'http://100.101.2.3:8097',
+    ]);
+  });
+  it('picks the best REACHABLE address (home: Wi-Fi; away: Tailscale)', () => {
+    const ranked = ['http://192.168.1.5:8097', 'http://100.101.2.3:8097'];
+    assert.equal(pickBest(ranked, new Set(ranked)), 'http://192.168.1.5:8097');
+    assert.equal(pickBest(ranked, new Set(['http://100.101.2.3:8097'])), 'http://100.101.2.3:8097');
+    assert.equal(pickBest(ranked, new Set()), null);
+  });
+  it('scans only the private /24, skipping the phone itself', () => {
+    const h = subnetHosts('192.168.12.40');
+    assert.equal(h.length, 253);
+    assert.ok(!h.includes('192.168.12.40') && h.includes('192.168.12.66'));
+    assert.deepEqual(subnetHosts('100.99.189.101'), [], 'never sweep the tailnet / carrier range');
+    assert.deepEqual(subnetHosts(null), []);
+  });
+  it('pool keeps concurrency bounded and drops failures', async () => {
+    let active = 0;
+    let peak = 0;
+    const out = await pool([1, 2, 3, 4, 5, 6, 7, 8], 3, async (n) => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 5));
+      active--;
+      if (n % 2) throw new Error('down');
+      return n;
+    });
+    assert.ok(peak <= 3);
+    assert.deepEqual(out.sort(), [2, 4, 6, 8]);
+  });
+});
+
+describe('live channel', () => {
+  const live = (liveId: string, text: string, over: Record<string, unknown> = {}) =>
+    ({ type: 'live.update', chatId: 'c1', sessionId: 's1', liveId, text, final: false, at: new Date().toISOString(), ...over }) as const;
+
+  it('streams a preview into one bubble and drops it when the persisted reply lands', () => {
+    let st = setSessions(emptyMirror, [sess('s1', { chatId: 'c1' })]);
+    st = setMessages(st, 's1', [msg(1, { role: 'user', content: 'hi' })], 'working');
+    st = applyEvent(st, live('L1', 'Hel ▉'));
+    st = applyEvent(st, live('L1', 'Hello wor ▉'));
+    assert.equal(liveFor(st, 'c1', 's1').length, 1);
+    assert.equal(liveFor(st, 'c1', 's1')[0]!.text, 'Hello wor');
+    assert.equal(liveFor(st, 'c1', 's1')[0]!.duringTurn, true);
+    st = applyEvent(st, { type: 'message.created', sessionId: 's1', message: msg(2, { content: 'Hello world!' }) });
+    assert.equal(liveFor(st, 'c1', 's1').length, 0);
+  });
+
+  it('turn end clears tool progress; standalone replies stay until the next message', () => {
+    let st = setSessions(emptyMirror, [sess('s1', { chatId: 'c1' })]);
+    st = setMessages(st, 's1', [], 'working');
+    st = applyEvent(st, live('T1', '💻 terminal: ls'));
+    st = applyEvent(st, { type: 'session.updated', sessionId: 's1', status: 'idle', lastMessage: null, at: '' });
+    assert.equal(liveFor(st, 'c1', 's1').length, 0, 'tool progress is gone after the turn');
+    st = applyEvent(st, live('M1', 'Current model: gpt-x'));
+    assert.equal(liveFor(st, 'c1', 's1')[0]!.duringTurn, false);
+    st = applyEvent(st, { type: 'session.updated', sessionId: 's1', status: 'idle', lastMessage: null, at: '' });
+    assert.equal(liveFor(st, 'c1', 's1').length, 1, '/model output survives idle');
+    st = enqueue(st, { clientMessageId: 'x', chatId: null, sessionId: 's1', text: 'next' });
+    assert.equal(liveFor(st, 'c1', 's1').length, 0, 'retired by the next message');
+  });
+
+  it('live.remove deletes; a final edit already persisted is not shown', () => {
+    let st = setSessions(emptyMirror, [sess('s1', { chatId: 'c1' })]);
+    st = setMessages(st, 's1', [msg(3, { content: 'Done.' })]);
+    st = applyEvent(st, live('L2', 'Done. ▉', { final: true }));
+    assert.equal(liveFor(st, 'c1', 's1').length, 0);
+    st = applyEvent(st, live('L3', 'x'));
+    st = applyEvent(st, { type: 'live.remove', chatId: 'c1', sessionId: 's1', liveId: 'L3', at: '' });
+    assert.equal(st.live.length, 0);
+    assert.equal(stripCursor('abc ▉'), 'abc');
+  });
+
+  it('a new chat with no session yet still gets its preview by chatId', () => {
+    const st = applyEvent(emptyMirror, live('N1', 'Hi ▉', { chatId: 'p_new', sessionId: null }));
+    assert.equal(liveFor(st, 'p_new', null).length, 1);
+  });
+});
+
+describe('one-tap pairing client', () => {
+  it('posts the request and polls status without a token', async () => {
+    const urls: string[] = [];
+    const c = new BridgeClient({
+      baseUrl: 'http://192.168.1.5:8097',
+      fetchImpl: (async (u: unknown, init?: RequestInit) => {
+        urls.push(`${init?.method} ${String(u)} ${(init?.headers as Record<string, string>).Authorization ?? '-'}`);
+        return new Response(JSON.stringify(String(u).includes('/request/') ? { status: 'pending' } : { requestId: 'r', confirm: '1234', expiresAt: '', hub: { displayName: 'pc', hubId: 'h' } }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal((await c.pairRequest({ deviceName: 'Pixel', platform: 'android', appVersion: '1' })).confirm, '1234');
+    assert.equal((await c.pairRequestStatus('r')).status, 'pending');
+    assert.deepEqual(urls, [
+      'POST http://192.168.1.5:8097/v1/pair/request -',
+      'GET http://192.168.1.5:8097/v1/pair/request/r -',
+    ]);
   });
 });

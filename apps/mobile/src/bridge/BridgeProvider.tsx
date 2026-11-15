@@ -20,6 +20,7 @@ import { clearPairingToken, loadPairing, savePairing, type Pairing } from './pai
 import { BridgeSocket, type SocketState } from './socket';
 import type { Health, PairCompleteResponse, Session } from './types';
 import { describeError } from './errors';
+import { addressKind, mergeAddresses, pickBest, type AddressKind } from './network';
 
 export type Connection = 'unpaired' | 'connecting' | 'online' | 'offline' | 'revoked';
 
@@ -32,6 +33,9 @@ export interface SendTarget {
 interface BridgeApi {
   ready: boolean;
   pairing: Pairing;
+  /** Address in use right now (picked from pairing.addresses: LAN when home, Tailscale outside). */
+  activeUrl: string;
+  activeKind: AddressKind | null;
   connection: Connection;
   health: Health | null;
   lastError: string | null;
@@ -50,13 +54,16 @@ interface BridgeApi {
   send: (target: SendTarget, text: string) => Promise<void>;
   retry: (clientMessageId: string) => Promise<void>;
   discard: (clientMessageId: string) => void;
+  /** Re-probe all known PC addresses and switch to the best reachable one. */
+  reresolve: () => Promise<string | null>;
   /** Wait until a phone chat has become a Hermes session (first agent pickup). */
   resolveChat: (chatId: string, timeoutMs?: number) => Promise<Session | null>;
 }
 
 const Ctx = createContext<BridgeApi | null>(null);
 const PAGE = 50;
-const emptyPairing: Pairing = { baseUrl: '', token: null, deviceId: null, pcName: null, hubId: null };
+const emptyPairing: Pairing = { baseUrl: '', addresses: [], token: null, deviceId: null, pcName: null, hubId: null };
+const PROBE_TIMEOUT_MS = 2500;
 
 export function BridgeProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -67,6 +74,8 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
   const [lastError, setLastError] = useState<string | null>(null);
   const [mirror, setMirror] = useState<MirrorState>(emptyMirror);
   const [nextBefore, setNextBefore] = useState<number | null>(null);
+  const [activeUrl, setActiveUrl] = useState('');
+  const resolving = useRef<Promise<string | null> | null>(null);
   const mirrorRef = useRef<MirrorState>(emptyMirror);
   const openSessions = useRef(new Set<string>());
   const socketRef = useRef<BridgeSocket | null>(null);
@@ -79,17 +88,63 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const client = useMemo(
-    () => new BridgeClient({ baseUrl: pairing.baseUrl, token: pairing.token }),
-    [pairing.baseUrl, pairing.token],
-  );
+  const baseUrl = activeUrl || pairing.baseUrl;
+  const client = useMemo(() => new BridgeClient({ baseUrl, token: pairing.token }), [baseUrl, pairing.token]);
+  const pairingRef = useRef(pairing);
+  pairingRef.current = pairing;
 
   useEffect(() => {
     void loadPairing().then((p) => {
       setPairing(p);
+      setActiveUrl(p.addresses[0] ?? p.baseUrl);
       setReady(true);
     });
   }, []);
+
+  /** Remember new addresses the PC reports (e.g. a new Wi-Fi IP) so roaming keeps working. */
+  const learnAddresses = useCallback(async (more: string[] | undefined) => {
+    const p = pairingRef.current;
+    if (!p.token || !more?.length) return;
+    const merged = mergeAddresses(p.addresses, more);
+    if (merged.join() === p.addresses.join()) return;
+    const next = { ...p, addresses: merged };
+    pairingRef.current = next;
+    setPairing(next);
+    await savePairing(next);
+  }, []);
+
+  const reresolve = useCallback(async (): Promise<string | null> => {
+    if (resolving.current) return resolving.current;
+    const run = (async () => {
+      const p = pairingRef.current;
+      const candidates = mergeAddresses(p.addresses, [p.baseUrl]);
+      if (!p.token || !candidates.length) return null;
+      const reachable = new Set<string>();
+      const seen: string[][] = [];
+      await Promise.all(
+        candidates.map(async (u) => {
+          try {
+            const h = await new BridgeClient({ baseUrl: u, timeoutMs: PROBE_TIMEOUT_MS }).health();
+            if (p.hubId && h.hub.hubId !== p.hubId) return; // a different PC answered on that IP
+            reachable.add(u);
+            if (h.hub.addresses) seen.push(h.hub.addresses);
+          } catch {
+            /* unreachable from here */
+          }
+        }),
+      );
+      const best = pickBest(candidates, reachable);
+      if (best) setActiveUrl((cur) => (cur === best ? cur : best));
+      if (seen.length) void learnAddresses(seen.flat());
+      return best;
+    })();
+    resolving.current = run;
+    try {
+      return await run;
+    } finally {
+      resolving.current = null;
+    }
+  }, [learnAddresses]);
 
   const fail = useCallback(
     (err: unknown) => {
@@ -129,13 +184,14 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     try {
       const h = await client.health();
       setHealth(h);
+      void learnAddresses(h.hub.addresses);
       return h;
     } catch (err) {
       setHealth(null);
       fail(err);
       return null;
     }
-  }, [client, fail]);
+  }, [client, fail, learnAddresses]);
 
   const syncSession = useCallback(
     async (sessionId: string) => {
@@ -168,12 +224,12 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     openSessions.current.delete(sessionId);
   }, []);
 
-  // Live socket — one per pairing.
+  // Live socket — one per pairing + active address.
   useEffect(() => {
-    if (!pairing.token || !pairing.baseUrl) return;
+    if (!pairing.token || !baseUrl) return;
     setRevoked(false);
     const sock = new BridgeSocket({
-      baseUrl: pairing.baseUrl,
+      baseUrl,
       token: pairing.token,
       getSince: () => mirrorRef.current.cursor,
       onEvent: (ev) => update((s) => applyEvent(s, ev)),
@@ -185,7 +241,13 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
       sock.stop();
       socketRef.current = null;
     };
-  }, [pairing.baseUrl, pairing.token, update]);
+  }, [baseUrl, pairing.token, update]);
+
+  // Pick the best address at start-up (LAN beats Tailscale when both answer).
+  useEffect(() => {
+    if (ready && pairing.token) void reresolve();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, pairing.token]);
 
   // Every (re)connect: refresh the list and catch up open chats (covers replay limits).
   useEffect(() => {
@@ -195,12 +257,16 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     for (const sid of openSessions.current) void syncSession(sid).catch(() => undefined);
   }, [socketState, refreshSessions, refreshHealth, syncSession]);
 
-  // Socket keeps failing → find out why over REST (401 = revoked, else offline).
+  // Socket dropped → maybe we changed networks: try every known address, then find out why (401 = revoked).
   useEffect(() => {
     if (socketState !== 'closed' || !pairing.token) return;
-    const t = setTimeout(() => void client.sessions({ limit: 1 }).catch(fail), 1500);
+    const t = setTimeout(() => {
+      void reresolve().then((best) => {
+        if (!best || best === baseUrl) void client.sessions({ limit: 1 }).catch(fail);
+      });
+    }, 1200);
     return () => clearTimeout(t);
-  }, [socketState, pairing.token, client, fail]);
+  }, [socketState, pairing.token, client, fail, reresolve, baseUrl]);
 
   // A message for an unknown session (e.g. a new chat just started) → refetch the list.
   useEffect(() => {
@@ -211,14 +277,17 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
-      if (st === 'active') socketRef.current?.kick();
+      if (st !== 'active') return;
+      // Back in the app: networks may have changed (home Wi-Fi ↔ mobile + Tailscale).
+      void reresolve().then(() => socketRef.current?.kick());
     });
     return () => sub.remove();
-  }, []);
+  }, [reresolve]);
 
-  const completePairing = useCallback(async (baseUrl: string, res: PairCompleteResponse) => {
+  const completePairing = useCallback(async (pairedUrl: string, res: PairCompleteResponse) => {
     const p: Pairing = {
-      baseUrl,
+      baseUrl: pairedUrl,
+      addresses: mergeAddresses(res.hub.addresses, [pairedUrl]),
       token: res.deviceToken,
       deviceId: res.deviceId,
       pcName: res.hub.displayName,
@@ -229,17 +298,21 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     setMirror(emptyMirror);
     setRevoked(false);
     setLastError(null);
+    pairingRef.current = p;
+    setActiveUrl(pairedUrl); // proven reachable right now
     setPairing(p);
   }, []);
 
   const unpair = useCallback(async () => {
+    // Best effort: revoke on the PC so a copied token is useless; offline PCs keep it until re-pair.
+    await client.revokeSelf().catch(() => undefined);
     await clearPairingToken();
     socketRef.current?.stop();
     mirrorRef.current = emptyMirror;
     setMirror(emptyMirror);
     setHealth(null);
     setPairing((p) => ({ ...p, token: null, deviceId: null }));
-  }, []);
+  }, [client]);
 
   const newChat = useCallback(async () => (await client.newChat()).chatId, [client]);
 
@@ -320,6 +393,8 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
   const value: BridgeApi = {
     ready,
     pairing,
+    activeUrl: baseUrl,
+    activeKind: baseUrl ? addressKind(baseUrl) : null,
     connection,
     health,
     lastError,
@@ -338,6 +413,7 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     retry,
     discard,
     resolveChat,
+    reresolve,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

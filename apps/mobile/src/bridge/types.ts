@@ -13,8 +13,15 @@ export interface Health {
   ok: boolean;
   apiVersion: number;
   time: string;
-  hub: { status: 'up'; uptimeSec: number; displayName: string; hubId: string };
-  pairing: { required: boolean; devicesPaired: number };
+  hub: {
+    status: 'up';
+    uptimeSec: number;
+    displayName: string;
+    hubId: string;
+    /** Every address a phone may use (Tailscale IP, MagicDNS, LAN). */
+    addresses?: string[];
+  };
+  pairing: { required: boolean; devicesPaired: number; oneTap?: boolean };
   /** Highest message id the Gateway has seen. */
   cursor: number;
   /** Connected WebSocket clients. */
@@ -74,13 +81,32 @@ export interface PairCompleteRequest {
   appVersion: string;
 }
 
+export interface HubInfo {
+  displayName: string;
+  hubId: string;
+  addresses?: string[];
+}
+
 export interface PairCompleteResponse {
   deviceId: string;
   deviceToken: string;
   tokenType: 'Bearer';
   expiresAt: string | null;
-  hub: { displayName: string; hubId: string };
+  hub: HubInfo;
 }
+
+/** One-tap pairing: the phone asks, the PC owner taps Allow on http://127.0.0.1:8097/pair. */
+export interface PairRequestResponse {
+  requestId: string;
+  /** Shown on both screens so the owner approves the right phone. */
+  confirm: string;
+  expiresAt: string;
+  hub: HubInfo;
+}
+
+export type PairRequestStatus =
+  | { status: 'pending' | 'denied' | 'expired' }
+  | ({ status: 'approved' } & PairCompleteResponse);
 
 export interface SendResponse {
   accepted: boolean;
@@ -125,7 +151,27 @@ export interface WsError {
   message?: string;
 }
 
+/** Ephemeral gateway output (streaming preview, tool progress, command reply) — never persisted. */
+export interface WsLiveUpdate {
+  type: 'live.update';
+  chatId: string;
+  sessionId: string | null;
+  liveId: string;
+  text: string;
+  final: boolean;
+  at: string;
+}
+export interface WsLiveRemove {
+  type: 'live.remove';
+  chatId: string;
+  sessionId: string | null;
+  liveId: string;
+  at: string;
+}
+
 export type WsServerEvent =
+  | WsLiveUpdate
+  | WsLiveRemove
   | WsServerHello
   | WsStatusSnapshot
   | WsMessageCreated

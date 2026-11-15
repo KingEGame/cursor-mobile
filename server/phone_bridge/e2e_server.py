@@ -75,13 +75,19 @@ async def main() -> None:
         c.execute("INSERT INTO messages(session_id, role, content, tool_name, tool_call_id, timestamp)"
                   " VALUES (?, 'tool', 'ok', 'terminal', 't1', ?)", (sid, time.time()))
         c.commit()
-        await asyncio.sleep(0.8)
+        # Stream the reply like the gateway stream consumer: send() a preview, then edit it.
+        chat, final_text = event.source.chat_id, f"**echo:** {text}"
+        mid = (await ad.send(chat, "**echo:** ▉")).message_id
+        for cut in (len(final_text) // 3, 2 * len(final_text) // 3):
+            await asyncio.sleep(0.35)
+            await ad.edit_message(chat, mid, final_text[:cut] + " ▉")
+        await asyncio.sleep(0.35)
         c.execute("INSERT INTO messages(session_id, role, content, finish_reason, timestamp)"
-                  " VALUES (?, 'assistant', ?, 'stop', ?)", (sid, f"**echo:** {text}", time.time()))
+                  " VALUES (?, 'assistant', ?, 'stop', ?)", (sid, final_text, time.time()))
         c.execute("UPDATE sessions SET message_count = message_count + 4 WHERE id=?", (sid,))
         c.execute("DELETE FROM session_turn_leases WHERE conversation_id=?", (sid,))
         c.commit(); c.close()
-        await ad.send(event.source.chat_id, "done")
+        await ad.edit_message(chat, mid, final_text, finalize=True)
 
     ad.handle_message = fake_agent
     assert await ad.connect(), "adapter failed to start"

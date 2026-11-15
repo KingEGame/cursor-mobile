@@ -9,7 +9,7 @@ if [ -L "$DST" ]; then
 fi
 if [ -e "$DST" ]; then
   BAK="$DST.bak-$(date +%Y%m%d%H%M%S)"
-  mv "$DST" "$BAK" && echo "backup: $BAK"
+  mkdir -p "$HOME/.hermes/backups" && BAK="$HOME/.hermes/backups/$(basename "$BAK")" && mv "$DST" "$BAK" && echo "backup: $BAK (outside plugins/ so Hermes does not load it)"
 fi
 ln -s "$SRC" "$DST" && echo "linked: $DST -> $SRC"
 echo "then: hermes plugins enable phone-bridge && systemctl --user restart hermes-gateway"

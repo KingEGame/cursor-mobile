@@ -2,7 +2,7 @@
  * Pure, testable mirror of the PC's state.db as seen by the phone.
  * Every mutation goes through these functions; React only holds the resulting object.
  */
-import type { Message, Session, SessionStatus, WsServerEvent } from './types';
+import type { Message, Session, SessionStatus, WsLiveUpdate, WsServerEvent } from './types';
 
 export type OutboxState = 'sending' | 'sent' | 'failed';
 
@@ -20,6 +20,18 @@ export interface OutboxItem {
   error?: string;
 }
 
+/** Ephemeral gateway output shown in a chat until the real (persisted) message replaces it. */
+export interface LiveItem {
+  liveId: string;
+  chatId: string;
+  sessionId: string | null;
+  text: string;
+  final: boolean;
+  at: number;
+  /** Arrived while the agent was running (stream preview / tool progress) vs. a standalone reply (/model…). */
+  duringTurn: boolean;
+}
+
 export interface MirrorState {
   /** Newest first. */
   sessions: Session[];
@@ -29,6 +41,7 @@ export interface MirrorState {
   /** Highest message id applied — sent as `since` on reconnect. */
   cursor: number;
   outbox: OutboxItem[];
+  live: LiveItem[];
   /** A message arrived for a session we do not list yet → caller should refetch the list. */
   needsSessionRefresh: boolean;
 }
@@ -39,8 +52,62 @@ export const emptyMirror: MirrorState = {
   working: {},
   cursor: 0,
   outbox: [],
+  live: [],
   needsSessionRefresh: false,
 };
+
+/** The stream consumer appends a typing cursor (" ▉") to previews. */
+export function stripCursor(text: string): string {
+  return text.replace(/\s*▉\s*$/u, '');
+}
+
+const norm = (t: string) => stripCursor(t).replace(/\s+/g, ' ').trim();
+
+function sessionForChat(st: MirrorState, chatId: string): string | null {
+  return st.sessions.find((s) => s.chatId === chatId)?.id ?? null;
+}
+
+function applyLive(st: MirrorState, ev: WsLiveUpdate): MirrorState {
+  const sid = ev.sessionId ?? sessionForChat(st, ev.chatId);
+  const text = stripCursor(ev.text);
+  // Persisted copy already here (DB poll beat the final edit) → nothing to preview.
+  const persisted = sid ? st.messages[sid] : undefined;
+  if (ev.final && persisted?.some((m) => m.role === 'assistant' && norm(m.content) === norm(text))) {
+    return { ...st, live: st.live.filter((l) => l.liveId !== ev.liveId) };
+  }
+  const prev = st.live.find((l) => l.liveId === ev.liveId);
+  const item: LiveItem = {
+    liveId: ev.liveId,
+    chatId: ev.chatId,
+    sessionId: sid,
+    text,
+    final: ev.final,
+    at: prev?.at ?? (Date.parse(ev.at) || Date.now()),
+    duringTurn: prev?.duringTurn ?? (sid ? Boolean(st.working[sid]) : true),
+  };
+  return { ...st, live: [...st.live.filter((l) => l.liveId !== ev.liveId), item] };
+}
+
+function belongs(l: LiveItem, sessionId: string | null | undefined, chatId: string | null | undefined): boolean {
+  return (sessionId != null && l.sessionId === sessionId) || (chatId != null && l.chatId === chatId);
+}
+
+/** Drop previews that the persisted assistant message now covers. */
+function consumeLive(st: MirrorState, m: Message): MirrorState {
+  if (m.role !== 'assistant' || !m.content.trim() || !st.live.length) return st;
+  const chatId = st.sessions.find((s) => s.id === m.sessionId)?.chatId ?? null;
+  const content = norm(m.content);
+  const keep = st.live.filter((l) => {
+    if (!belongs(l, m.sessionId, chatId)) return true;
+    const t = norm(l.text);
+    return !(t && (content === t || content.startsWith(t)));
+  });
+  return keep.length === st.live.length ? st : { ...st, live: keep };
+}
+
+export function liveFor(st: MirrorState, chatId: string | null | undefined, sessionId: string | null | undefined): LiveItem[] {
+  return st.live.filter((l) => belongs(l, sessionId, chatId)).sort((a, b) => a.at - b.at);
+}
 
 const MAX_MESSAGES_PER_SESSION = 1000;
 
@@ -101,6 +168,7 @@ export function setMessages(st: MirrorState, sessionId: string, msgs: Message[],
   let next: MirrorState = { ...st, messages: { ...st.messages, [sessionId]: merged } };
   if (st.cursor === 0) next.cursor = maxId; // first data: start live sync from here
   if (status) next = applyStatus(next, sessionId, status);
+  for (const m of msgs) next = consumeLive(next, m);
   return reconcileOutbox(next);
 }
 
@@ -108,7 +176,16 @@ function applyStatus(st: MirrorState, sessionId: string, status: 'working' | 'id
   const working = { ...st.working };
   if (status === 'working') working[sessionId] = true;
   else delete working[sessionId];
-  return { ...st, working, sessions: st.sessions.map((s) => (s.id === sessionId ? withStatus(s, working) : s)) };
+  const chatId = st.sessions.find((s) => s.id === sessionId)?.chatId ?? null;
+  // Turn over: stream previews and tool progress are done; the persisted reply is what stays.
+  const live =
+    status === 'idle' ? st.live.filter((l) => !(l.duringTurn && belongs(l, sessionId, chatId))) : st.live;
+  return {
+    ...st,
+    working,
+    live,
+    sessions: st.sessions.map((s) => (s.id === sessionId ? withStatus(s, working) : s)),
+  };
 }
 
 function previewOf(m: Message): string | null {
@@ -142,6 +219,10 @@ export function applyEvent(st: MirrorState, ev: WsServerEvent): MirrorState {
       for (const id of ev.working) working[id] = true;
       return { ...st, working, sessions: st.sessions.map((s) => withStatus(s, working)) };
     }
+    case 'live.update':
+      return applyLive(st, ev);
+    case 'live.remove':
+      return { ...st, live: st.live.filter((l) => l.liveId !== ev.liveId) };
     case 'message.created': {
       const m = ev.message;
       if (m.id <= st.cursor && st.messages[m.sessionId]?.some((x) => x.id === m.id)) return st;
@@ -150,6 +231,7 @@ export function applyEvent(st: MirrorState, ev: WsServerEvent): MirrorState {
         next = { ...next, messages: { ...next.messages, [m.sessionId]: mergeMessages(next.messages[m.sessionId], [m]) } };
       }
       next = touchSession(next, m);
+      next = consumeLive(next, m);
       return reconcileOutbox(next);
     }
     case 'session.updated': {
@@ -162,6 +244,7 @@ export function applyEvent(st: MirrorState, ev: WsServerEvent): MirrorState {
             messages: { ...next.messages, [ev.sessionId]: mergeMessages(next.messages[ev.sessionId], [ev.lastMessage]) },
           };
         }
+        next = consumeLive(next, ev.lastMessage);
       }
       if (!next.sessions.some((s) => s.id === ev.sessionId)) next = { ...next, needsSessionRefresh: true };
       return next;
@@ -180,7 +263,9 @@ export function enqueue(
 ): MirrorState {
   const prev = st.outbox.find((o) => o.clientMessageId === item.clientMessageId);
   const entry: OutboxItem = { ...item, state: 'sending', createdAt: prev?.createdAt ?? now, afterId: prev?.afterId ?? st.cursor };
-  return { ...st, outbox: [...st.outbox.filter((o) => o.clientMessageId !== item.clientMessageId), entry] };
+  // A new message from the user retires earlier standalone replies (e.g. the /model listing) in that chat.
+  const live = st.live.filter((l) => l.duringTurn || !belongs(l, item.sessionId, item.chatId));
+  return { ...st, live, outbox: [...st.outbox.filter((o) => o.clientMessageId !== item.clientMessageId), entry] };
 }
 
 export function markOutbox(st: MirrorState, clientMessageId: string, state: OutboxState, error?: string): MirrorState {

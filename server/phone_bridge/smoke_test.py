@@ -166,6 +166,59 @@ async def main() -> int:
             await asyncio.sleep(0.2)
             check("slash command passes through as COMMAND", captured[-1].message_type.value == "command",
                   captured[-1].message_type.value)
+
+            # ---- live channel: streaming previews / command replies (not persisted) ----
+            ws3 = await http.ws_connect(f"{base}/v1/ws?access_token={tok}")
+            await ws3.send_json({"type": "client.hello", "sessions": []})
+            await ws3.receive_json(timeout=5); await ws3.receive_json(timeout=5)
+            sr = await ad.send("p_smoke", "Думаю ▉")
+            ev, _ = await wait_event(ws3, lambda e: e["type"] == "live.update")
+            check("send() pushes live.update with session", ev and ev["text"] == "Думаю ▉" and ev["chatId"] == "p_smoke"
+                  and ev["sessionId"] == sid and ev["liveId"] == sr.message_id, str(ev))
+            er = await ad.edit_message("p_smoke", sr.message_id, "Думаю, готово", finalize=True)
+            ev, _ = await wait_event(ws3, lambda e: e["type"] == "live.update" and e.get("final"))
+            check("edit_message() streams into the same bubble", er.success and ev and ev["liveId"] == sr.message_id
+                  and ev["text"] == "Думаю, готово")
+            await ad.delete_message("p_smoke", sr.message_id)
+            ev, _ = await wait_event(ws3, lambda e: e["type"] == "live.remove")
+            check("delete_message() pushes live.remove", ev and ev["liveId"] == sr.message_id)
+            await ws3.close()
+
+            h2 = await (await http.get(f"{base}/v1/health")).json()
+            check("health lists phone-reachable addresses", isinstance(h2["hub"].get("addresses"), list)
+                  and all(a.startswith("http://") for a in h2["hub"]["addresses"]) and h2["pairing"]["oneTap"],
+                  ",".join(h2["hub"].get("addresses", [])))
+
+            # ---- one-tap pairing: phone asks, PC owner allows ----
+            req = await (await http.post(f"{base}/v1/pair/request", json={
+                "deviceName": "Pixel <img src=x>", "platform": "android", "appVersion": "t"})).json()
+            check("pair request returns id + 4-digit confirm", len(req["requestId"]) >= 20 and len(req["confirm"]) == 4)
+            st0 = await (await http.get(f"{base}/v1/pair/request/{req['requestId']}")).json()
+            check("status pending until the PC decides", st0["status"] == "pending")
+            lst = await (await http.get(f"{base}/pair/requests")).json()
+            mine = [x for x in lst["items"] if x["id"] == req["requestId"]]
+            check("PC page lists it with the same confirm code", mine and mine[0]["confirm"] == req["confirm"])
+            evil = await http.post(f"{base}/pair/requests/{req['requestId']}/approve",
+                                   headers={"Origin": "http://evil.example"})
+            check("cross-site approve refused (CSRF)", evil.status == 403, str(evil.status))
+            ok = await http.post(f"{base}/pair/requests/{req['requestId']}/approve",
+                                 headers={"Origin": f"http://127.0.0.1:{PORT}"})
+            check("PC approve accepted", ok.status == 200, str(ok.status))
+            st1 = await (await http.get(f"{base}/v1/pair/request/{req['requestId']}")).json()
+            tok2 = st1.get("deviceToken")
+            check("phone collects token after approval", st1["status"] == "approved" and tok2
+                  and st1["hub"]["hubId"] == h2["hub"]["hubId"])
+            st2 = await (await http.get(f"{base}/v1/pair/request/{req['requestId']}")).json()
+            check("token handed out exactly once", st2["status"] == "expired" and "deviceToken" not in st2)
+            r2 = await http.get(f"{base}/v1/sessions?limit=1", headers={"Authorization": f"Bearer {tok2}"})
+            check("one-tap token works", r2.status == 200, str(r2.status))
+            req2 = await (await http.post(f"{base}/v1/pair/request", json={"deviceName": "x"})).json()
+            await http.post(f"{base}/pair/requests/{req2['requestId']}/deny")
+            st3 = await (await http.get(f"{base}/v1/pair/request/{req2['requestId']}")).json()
+            check("deny is reported to the phone", st3["status"] == "denied" and "deviceToken" not in st3)
+            rv = await http.post(f"{base}/v1/device/revoke", headers={"Authorization": f"Bearer {tok2}"})
+            after = await http.get(f"{base}/v1/sessions?limit=1", headers={"Authorization": f"Bearer {tok2}"})
+            check("phone can revoke its own token", rv.status == 200 and after.status == 401, f"{rv.status}/{after.status}")
     finally:
         await ad.disconnect()
         shutil.rmtree(tmp, ignore_errors=True)

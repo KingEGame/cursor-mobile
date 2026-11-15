@@ -18,6 +18,7 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
 
   const check = async () => {
     setChecking(true);
+    await bridge.reresolve();
     await bridge.refreshHealth();
     setChecking(false);
   };
@@ -44,7 +45,12 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
       <Text style={styles.section}>Computer</Text>
       <View style={styles.card}>
         <Row label="Name" value={bridge.pairing.pcName ?? '—'} />
-        <Row label="Address" value={bridge.pairing.baseUrl || '—'} mono />
+        <Row
+          label="Using"
+          value={bridge.activeUrl ? `${bridge.activeUrl} · ${bridge.activeKind === 'lan' ? 'Wi-Fi' : bridge.activeKind === 'tailscale' ? 'Tailscale' : 'name'}` : '—'}
+          mono
+        />
+        <Row label="Known addresses" value={bridge.pairing.addresses.join('\n') || '—'} mono />
         <Row label="Connection" value={bridge.connection} />
         <Row label="Gateway" value={h ? `up ${uptime(h.hub.uptimeSec)} · API v${h.apiVersion}` : checking ? 'checking…' : 'unreachable'} />
         {h ? <Row label="Paired phones" value={String(h.pairing.devicesPaired)} /> : null}
@@ -77,7 +83,7 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
-      <Text selectable style={[styles.rowValue, mono && styles.mono]} numberOfLines={2}>
+      <Text selectable style={[styles.rowValue, mono && styles.mono]} numberOfLines={4}>
         {value}
       </Text>
     </View>

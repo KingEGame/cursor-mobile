@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { normalizeBaseUrl } from './client';
+import { mergeAddresses } from './network';
 
 const KEYS = {
   baseUrl: 'hub_base_url',
@@ -8,10 +9,14 @@ const KEYS = {
   deviceId: 'device_id',
   pcName: 'hub_display_name',
   hubId: 'hub_id',
+  addresses: 'hub_addresses',
 } as const;
 
 export interface Pairing {
+  /** Address the phone paired through (always part of `addresses`). */
   baseUrl: string;
+  /** Every known address of this PC, best first (LAN → Tailscale IP → MagicDNS). */
+  addresses: string[];
   token: string | null;
   deviceId: string | null;
   pcName: string | null;
@@ -31,13 +36,21 @@ export function isLegacyHubUrl(url: string | null | undefined): boolean {
 }
 
 export async function loadPairing(): Promise<Pairing> {
-  const [storedUrl, storedToken, storedDeviceId, pcName, hubId] = await Promise.all([
+  const [storedUrl, storedToken, storedDeviceId, pcName, hubId, storedAddrs] = await Promise.all([
     SecureStore.getItemAsync(KEYS.baseUrl),
     SecureStore.getItemAsync(KEYS.token),
     SecureStore.getItemAsync(KEYS.deviceId),
     SecureStore.getItemAsync(KEYS.pcName),
     SecureStore.getItemAsync(KEYS.hubId),
+    SecureStore.getItemAsync(KEYS.addresses),
   ]);
+  let addrs: string[] = [];
+  try {
+    const v = storedAddrs ? JSON.parse(storedAddrs) : [];
+    addrs = Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+  } catch {
+    addrs = [];
+  }
   let baseUrl = storedUrl;
   let token = storedToken;
   let deviceId = storedDeviceId;
@@ -45,9 +58,12 @@ export async function loadPairing(): Promise<Pairing> {
     // One-time migration from the Cursor Hub app: keep nothing that points at the old server.
     await Promise.all(Object.values(KEYS).map((k) => SecureStore.deleteItemAsync(k)));
     baseUrl = token = deviceId = null;
+    addrs = [];
   }
+  const base = normalizeBaseUrl(baseUrl || defaultBaseUrl());
   return {
-    baseUrl: normalizeBaseUrl(baseUrl || defaultBaseUrl()),
+    baseUrl: base,
+    addresses: token ? mergeAddresses(addrs, [base]) : [],
     token: token || null,
     deviceId: deviceId || null,
     pcName: token ? pcName || null : null,
@@ -63,6 +79,7 @@ export async function savePairing(p: Pairing): Promise<void> {
     set(KEYS.deviceId, p.deviceId),
     set(KEYS.pcName, p.pcName),
     set(KEYS.hubId, p.hubId),
+    set(KEYS.addresses, p.addresses.length ? JSON.stringify(mergeAddresses(p.addresses, [p.baseUrl])) : null),
   ]);
 }
 

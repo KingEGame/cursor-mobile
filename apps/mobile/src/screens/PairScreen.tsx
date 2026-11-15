@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -11,7 +11,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { QrCode } from 'lucide-react-native';
+import { Monitor, QrCode, RefreshCw } from 'lucide-react-native';
+import { scanLan, type FoundPc } from '../bridge/discovery';
 import { QrScanner } from '../components/QrScanner';
 import { appVersion, useBridge } from '../bridge/BridgeProvider';
 import { BridgeClient, normalizeBaseUrl } from '../bridge/client';
@@ -19,6 +20,14 @@ import { describeError, parsePairPayload } from '../bridge/errors';
 import { DEFAULT_BRIDGE_PORT } from '../bridge/types';
 import type { ScreenProps } from '../navigation/types';
 import { colors, radii, spacing, type, weight } from '../theme';
+
+function deviceName(): string {
+  const c = Platform.constants as { Model?: string; Brand?: string };
+  const model = c.Model?.trim();
+  return model ? model : Platform.OS === 'android' ? 'Android phone' : 'iPhone';
+}
+
+type Scan = 'idle' | 'scanning' | 'done' | 'nowifi';
 
 export function PairScreen({ navigation, route }: ScreenProps<'Pair'>) {
   const bridge = useBridge();
@@ -28,6 +37,58 @@ export function PairScreen({ navigation, route }: ScreenProps<'Pair'>) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scan, setScan] = useState<Scan>('idle');
+  const [found, setFound] = useState<FoundPc[]>([]);
+  const [asking, setAsking] = useState<{ pc: FoundPc; confirm: string } | null>(null);
+  const cancelAsk = useRef(false);
+
+  const findPcs = async () => {
+    setScan('scanning');
+    setFound([]);
+    setError(null);
+    const { phoneIp, found: all } = await scanLan({
+      onFound: (pc) => setFound((cur) => (cur.some((x) => x.hubId === pc.hubId) ? cur : [...cur, pc])),
+    });
+    setFound(all);
+    setScan(phoneIp ? 'done' : 'nowifi');
+  };
+
+  // One tap: the phone asks, the owner taps Allow on the PC; no codes to type.
+  const askPc = async (pc: FoundPc) => {
+    setError(null);
+    cancelAsk.current = false;
+    try {
+      const c0 = new BridgeClient({ baseUrl: pc.url });
+      const req = await c0.pairRequest({ deviceName: deviceName(), platform: Platform.OS, appVersion: appVersion() });
+      setAsking({ pc, confirm: req.confirm });
+      const deadline = Date.parse(req.expiresAt) || Date.now() + 120_000;
+      while (!cancelAsk.current && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1200));
+        const st = await c0.pairRequestStatus(req.requestId).catch(() => null);
+        if (!st || st.status === 'pending') continue;
+        if (st.status === 'approved') {
+          await bridge.completePairing(pc.url, st);
+          navigation.reset({ index: 0, routes: [{ name: 'Sessions' }] });
+          return;
+        }
+        setError(st.status === 'denied' ? `${pc.name} declined this phone.` : 'The request expired — try again.');
+        break;
+      }
+      if (!cancelAsk.current && Date.now() >= deadline) setError('No answer on the PC in 2 minutes — try again.');
+    } catch (err) {
+      setError(describeError(err, pc.name));
+    } finally {
+      setAsking(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!route.params?.code) void findPcs();
+    return () => {
+      cancelAsk.current = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submit = async (u = url, c = code, pid = pairId) => {
     const baseUrl = normalizeBaseUrl(u);
@@ -42,7 +103,7 @@ export function PairScreen({ navigation, route }: ScreenProps<'Pair'>) {
       const res = await c0.pairComplete({
         code: digits,
         pairId: pid,
-        deviceName: `${Platform.OS === 'android' ? 'Android' : 'iPhone'} phone`,
+        deviceName: deviceName(),
         platform: Platform.OS,
         appVersion: appVersion(),
       });
@@ -87,6 +148,57 @@ export function PairScreen({ navigation, route }: ScreenProps<'Pair'>) {
             The phone talks to the Hermes Gateway on your PC. Every chat lives in the PC's history, so you can
             continue it from the terminal or the desktop app and see it here.
           </Text>
+
+          {asking ? (
+            <View style={styles.askCard}>
+              <Text style={styles.askTitle}>Allow this phone on {asking.pc.name}</Text>
+              <Text style={styles.stepText}>
+                A request popped up on the PC (or open http://127.0.0.1:{DEFAULT_BRIDGE_PORT}/pair there). Check that it
+                shows the same code and tap Allow:
+              </Text>
+              <Text style={styles.confirm} testID="pair-confirm">
+                {asking.confirm}
+              </Text>
+              <ActivityIndicator color={colors.accent} />
+              <Pressable style={styles.secondary} onPress={() => (cancelAsk.current = true)}>
+                <Text style={styles.secondaryText}>Cancel</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.findCard}>
+              <View style={styles.findHead}>
+                <Text style={styles.askTitle}>On this Wi-Fi</Text>
+                <Pressable onPress={() => void findPcs()} disabled={scan === 'scanning'} hitSlop={10} testID="pair-scan">
+                  {scan === 'scanning' ? (
+                    <ActivityIndicator color={colors.accent} />
+                  ) : (
+                    <RefreshCw size={18} color={colors.accent} />
+                  )}
+                </Pressable>
+              </View>
+              {found.map((pc) => (
+                <Pressable key={pc.hubId} style={styles.pcRow} onPress={() => void askPc(pc)} testID={`pair-pc-${pc.hubId}`}>
+                  <Monitor size={20} color={colors.text} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pcName}>{pc.name}</Text>
+                    <Text style={styles.pcUrl}>{pc.url}</Text>
+                  </View>
+                  <Text style={styles.secondaryText}>Connect</Text>
+                </Pressable>
+              ))}
+              <Text style={styles.hint}>
+                {scan === 'scanning'
+                  ? 'Looking for Hermes on your network…'
+                  : scan === 'nowifi'
+                    ? 'Not on Wi-Fi. Use the code below (works over Tailscale too).'
+                    : found.length
+                      ? 'Tap your PC, then Allow on the PC.'
+                      : 'No PC found. Is the Gateway running with the phone bridge? Or use the code below.'}
+              </Text>
+            </View>
+          )}
+
+          <Text style={styles.divider}>or with a code</Text>
 
           <View style={styles.step}>
             <Text style={styles.stepNo}>1</Text>
@@ -167,6 +279,31 @@ const styles = StyleSheet.create({
     fontWeight: weight.semibold,
     fontSize: type.meta,
   },
+  findCard: { backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.md, gap: spacing.sm },
+  findHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  askCard: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accentBorder,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+    alignItems: 'center',
+  },
+  askTitle: { fontSize: type.sub, fontWeight: weight.semibold, color: colors.text },
+  confirm: { fontSize: 40, fontWeight: weight.semibold, letterSpacing: 8, color: colors.accent },
+  pcRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceMuted,
+  },
+  pcName: { fontSize: type.body, fontWeight: weight.semibold, color: colors.text },
+  pcUrl: { fontSize: type.meta, color: colors.muted },
+  hint: { fontSize: type.meta, color: colors.muted, lineHeight: 18 },
+  divider: { textAlign: 'center', color: colors.muted, fontSize: type.meta, marginVertical: spacing.md },
   stepText: { flex: 1, fontSize: type.body, color: colors.text, lineHeight: 22 },
   mono: { fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), fontSize: type.meta },
   label: { fontSize: type.meta, color: colors.muted, marginTop: spacing.md, fontWeight: weight.semibold },

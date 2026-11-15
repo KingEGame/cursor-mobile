@@ -49,7 +49,9 @@ logger = logging.getLogger(__name__)
 
 API_VERSION = 1
 DEFAULT_PORT = 8097
-POLL_INTERVAL_S = 1.0
+POLL_INTERVAL_S = 0.5
+PAIR_REQUEST_TTL_S = 120
+ADDRESS_CACHE_S = 60
 PAIR_TTL_S = 300
 PAIR_MAX_ATTEMPTS = 5          # per client IP per minute
 REPLAY_LIMIT = 2000
@@ -129,6 +131,11 @@ class DeviceStore:
         if match is None:
             return None
         del self._pending[match]                                   # one-time use
+        return self.issue(name, platform, app_version)
+
+    def issue(self, name: str, platform: str, app_version: str) -> dict[str, Any]:
+        """New device + token (only its hash is kept)."""
+        now = time.time()
         device_id, token = f"dev_{uuid.uuid4().hex[:12]}", secrets.token_urlsafe(32)
         self._devices[device_id] = {
             "name": name or "phone", "platform": platform, "appVersion": app_version,
@@ -304,6 +311,9 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         self._wake = asyncio.Event()
         self._cursor = 0
         self._last_status: dict[str, str] = {}
+        self._pair_requests: dict[str, dict[str, Any]] = {}   # one-tap pairing waiting for the PC owner
+        self._addresses: list[str] = []
+        self._addresses_at = 0.0
         self._started = time.time()
 
     # lifecycle ------------------------------------------------------------
@@ -326,6 +336,11 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
             r.add_get("/v1/chats/{chat_id}/session", self._h_chat_session)
             r.add_post("/v1/sessions/{sid}/messages", self._h_send_to_session)
             r.add_get("/pair", self._h_pair_page)
+            r.add_post("/v1/device/revoke", self._h_device_revoke)
+            r.add_post("/v1/pair/request", self._h_pair_request)
+            r.add_get("/v1/pair/request/{rid}", self._h_pair_request_status)
+            r.add_get("/pair/requests", self._h_pair_requests_list)
+            r.add_post("/pair/requests/{rid}/{decision}", self._h_pair_decide)
             r.add_get("/v1/ws", self._h_ws)
             self._runner = web.AppRunner(app)
             await self._runner.setup()
@@ -362,12 +377,37 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
             self._runner = None
 
     # gateway -> phone -----------------------------------------------------
+    SUPPORTS_MESSAGE_EDITING = True
+
+    async def _live(self, chat_id: str, live_id: str, text: Optional[str], final: bool = False) -> None:
+        """Ephemeral, not persisted: streaming previews, tool progress, slash-command replies.
+        The phone drops a preview once the persisted message lands via ``message.created``."""
+        sid = await asyncio.to_thread(self._state.find_phone_session, chat_id)
+        ev: dict[str, Any] = {"type": "live.remove" if text is None else "live.update", "chatId": chat_id,
+                              "sessionId": sid, "liveId": live_id, "at": _iso(time.time())}
+        if text is not None:
+            ev.update(text=text, final=final)
+        await self._broadcast(ev, session_id=sid)
+
     async def send(self, chat_id: str, content: str, reply_to: Optional[str] = None,
                    metadata: Optional[dict[str, Any]] = None) -> SendResult:
-        # The reply is already persisted by the gateway in state.db; wake the poller so the phone
-        # sees it now instead of at the next tick.
+        # Persisted replies reach the phone through the DB poller (woken now); everything the gateway
+        # sends is also pushed live, so streaming previews and command replies show up immediately.
+        live_id = uuid.uuid4().hex[:12]
+        await self._live(chat_id, live_id, content or "")
         self._wake.set()
-        return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
+        return SendResult(success=True, message_id=live_id)
+
+    async def edit_message(self, chat_id: str, message_id: str, content: str, *,
+                           finalize: bool = False) -> SendResult:
+        await self._live(chat_id, message_id, content or "", final=finalize)
+        if finalize:
+            self._wake.set()
+        return SendResult(success=True, message_id=message_id)
+
+    async def delete_message(self, chat_id: str, message_id: str) -> bool:
+        await self._live(chat_id, message_id, None)
+        return True
 
     async def get_chat_info(self, chat_id: str) -> dict[str, Any]:
         return {"name": f"phone:{chat_id[:8]}", "type": "dm", "chat_id": chat_id}
@@ -425,7 +465,8 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
     # http -----------------------------------------------------------------
     @web.middleware
     async def _auth_middleware(self, request: "web.Request", handler):
-        if request.path in ("/v1/health", "/v1/pair/complete", "/v1/pair/start", "/pair"):
+        if (request.path in ("/v1/health", "/v1/pair/complete", "/v1/pair/start", "/v1/pair/request", "/pair")
+                or request.path.startswith(("/v1/pair/request/", "/pair/requests"))):
             return await handler(request)
         auth = request.headers.get("Authorization", "")
         token = auth[7:].strip() if auth.startswith("Bearer ") else request.query.get("access_token", "")
@@ -443,8 +484,9 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         return web.json_response({
             "ok": True, "apiVersion": API_VERSION, "time": _iso(time.time()),
             "hub": {"status": "up", "uptimeSec": int(time.time() - self._started),
-                    "displayName": socket.gethostname().split(".")[0], "hubId": self._hub_id},
-            "pairing": {"required": True, "devicesPaired": self._devices.count()},
+                    "displayName": socket.gethostname().split(".")[0], "hubId": self._hub_id,
+                    "addresses": await self._get_addresses()},
+            "pairing": {"required": True, "devicesPaired": self._devices.count(), "oneTap": True},
             "cursor": self._cursor, "clients": len(self._clients),
         })
 
@@ -465,9 +507,114 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
                                           str(body.get("appVersion", "")))
         if not res:
             return self._err(400, "PAIR_CODE_INVALID", "unknown, used or expired code")
-        return web.json_response({**res, "tokenType": "Bearer", "expiresAt": None,
-                                  "hub": {"displayName": socket.gethostname().split(".")[0], "hubId": self._hub_id}},
+        return web.json_response({**res, "tokenType": "Bearer", "expiresAt": None, "hub": await self._hub_info()},
                                  status=201)
+
+    async def _get_addresses(self) -> list[str]:
+        if time.time() - self._addresses_at > ADDRESS_CACHE_S or not self._addresses:
+            self._addresses = await asyncio.to_thread(self._phone_urls)
+            self._addresses_at = time.time()
+        return self._addresses
+
+    async def _hub_info(self) -> dict[str, Any]:
+        return {"displayName": socket.gethostname().split(".")[0], "hubId": self._hub_id,
+                "addresses": await self._get_addresses()}
+
+    # one-tap pairing ---------------------------------------------------------
+    def _is_local(self, request: "web.Request") -> bool:
+        if request.remote not in ("127.0.0.1", "::1"):
+            return False
+        origin = request.headers.get("Origin")
+        # A web page open in the PC browser must not approve phones behind the owner's back (CSRF).
+        return origin in (None, "null", f"http://127.0.0.1:{self._port}", f"http://localhost:{self._port}")
+
+    def _prune_requests(self) -> None:
+        now = time.time()
+        self._pair_requests = {k: v for k, v in self._pair_requests.items()
+                               if v["expires"] > now or v["status"] == "approved" and v["expires"] + 60 > now}
+
+    def _notify_pc(self, name: str, confirm: str) -> None:
+        import shutil, subprocess
+        if not shutil.which("notify-send"):
+            return
+        try:
+            subprocess.Popen(["notify-send", "-a", "Hermes", "-u", "critical", "Hermes Phone",
+                              f"{name} wants to connect — code {confirm}.\nOpen http://127.0.0.1:{self._port}/pair to allow."],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    async def _h_device_revoke(self, request: "web.Request") -> "web.Response":
+        """The phone disconnects itself: its token stops working on this PC immediately."""
+        ok = self._devices.revoke(request["device_id"])
+        for c in [c for c in self._clients if c.device_id == request["device_id"]]:
+            try:
+                await c.ws.close()
+            except Exception:
+                pass
+        return web.json_response({"ok": ok})
+
+    async def _h_pair_request(self, request: "web.Request") -> "web.Response":
+        if self._devices.rate_limited(request.remote or "?"):
+            return self._err(429, "RATE_LIMITED", "too many attempts, wait a minute")
+        try:
+            body = await request.json()
+        except ValueError:
+            return self._err(400, "VALIDATION_ERROR", "invalid JSON")
+        self._prune_requests()
+        if sum(1 for r in self._pair_requests.values() if r["status"] == "pending") >= 5:
+            return self._err(429, "RATE_LIMITED", "too many phones waiting for approval")
+        rid = secrets.token_urlsafe(18)   # unguessable: only the requesting phone can collect the token
+        confirm = f"{secrets.randbelow(10**4):04d}"
+        name = "".join(ch for ch in str(body.get("deviceName", "")) if ch.isprintable()).strip()[:60] or "phone"
+        now = time.time()
+        self._pair_requests[rid] = {"name": name, "platform": str(body.get("platform", ""))[:20],
+                                    "appVersion": str(body.get("appVersion", ""))[:20], "ip": request.remote,
+                                    "confirm": confirm, "created": now, "expires": now + PAIR_REQUEST_TTL_S,
+                                    "status": "pending", "result": None}
+        self._notify_pc(name, confirm)
+        logger.info("[phone] pairing request from %s (%s), code %s", name, request.remote, confirm)
+        return web.json_response({"requestId": rid, "confirm": confirm, "expiresAt": _iso(now + PAIR_REQUEST_TTL_S),
+                                  "hub": await self._hub_info()}, status=201)
+
+    async def _h_pair_request_status(self, request: "web.Request") -> "web.Response":
+        self._prune_requests()
+        r = self._pair_requests.get(request.match_info["rid"])
+        if not r:
+            return web.json_response({"status": "expired"})
+        if r["status"] == "approved" and r["result"]:
+            res = r["result"]
+            del self._pair_requests[request.match_info["rid"]]          # token handed out exactly once
+            return web.json_response({"status": "approved", **res, "tokenType": "Bearer", "expiresAt": None,
+                                      "hub": await self._hub_info()})
+        return web.json_response({"status": r["status"]})
+
+    async def _h_pair_requests_list(self, request: "web.Request") -> "web.Response":
+        if not self._is_local(request):
+            return self._err(403, "LOCAL_ONLY", "open this page on the PC itself")
+        self._prune_requests()
+        return web.json_response({"items": [
+            {"id": k, "name": v["name"], "platform": v["platform"], "ip": v["ip"], "confirm": v["confirm"],
+             "expiresIn": int(v["expires"] - time.time())}
+            for k, v in self._pair_requests.items() if v["status"] == "pending"]})
+
+    async def _h_pair_decide(self, request: "web.Request") -> "web.Response":
+        if not self._is_local(request):
+            return self._err(403, "LOCAL_ONLY", "approve phones on the PC itself")
+        self._prune_requests()
+        rid, decision = request.match_info["rid"], request.match_info["decision"]
+        r = self._pair_requests.get(rid)
+        if not r or r["status"] != "pending":
+            return self._err(404, "REQUEST_NOT_FOUND", "request expired or already handled")
+        if decision == "approve":
+            r["result"] = self._devices.issue(r["name"], r["platform"], r["appVersion"])
+            r["status"] = "approved"
+        elif decision == "deny":
+            r["status"] = "denied"
+        else:
+            return self._err(400, "VALIDATION_ERROR", "approve or deny")
+        logger.info("[phone] pairing request %s: %s", r["name"], r["status"])
+        return web.json_response({"ok": True, "status": r["status"]})
 
     async def _h_sessions(self, request: "web.Request") -> "web.Response":
         q = request.query
@@ -564,8 +711,23 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
 <title>Pair phone — {name}</title>
 <style>body{{font:16px system-ui;max-width:640px;margin:40px auto;padding:0 16px;color:#1a1c1e}}
 .code{{font:600 44px ui-monospace,monospace;letter-spacing:6px;margin:12px 0}}small{{color:#5f6368;word-break:break-all}}
-li{{margin:8px 0}}</style>
+li{{margin:8px 0}}.ask{{border:2px solid #1e6b4a;border-radius:12px;padding:12px;margin:12px 0;background:#e6f2ec}}
+.conf{{font:600 28px ui-monospace,monospace;letter-spacing:4px;margin:0 8px}}button{{font:inherit;padding:6px 14px;margin-left:6px}}</style>
 <h1>Pair a phone with Hermes on {name}</h1>
+<div id=req></div>
+<script>
+const esc = v => String(v).replace(/[&<>"']/g, c => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}})[c]);
+async function load(){{
+  const r = await fetch('/pair/requests'); const j = await r.json(); const box = document.getElementById('req');
+  box.innerHTML = (j.items||[]).map(x => `<div class=ask><b>${{esc(x.name)}}</b> (${{esc(x.ip)}}) wants to connect.<br>
+    Check that the phone shows <span class=conf>${{esc(x.confirm)}}</span>
+    <button data-id="${{esc(x.id)}}" data-d=approve>Allow</button> <button data-id="${{esc(x.id)}}" data-d=deny>Deny</button></div>`).join('');
+  box.querySelectorAll('button').forEach(b => b.onclick = () => act(b.dataset.id, b.dataset.d));
+}}
+async function act(id, d){{ await fetch(`/pair/requests/${{id}}/${{d}}`, {{method:'POST'}}); load(); }}
+load(); setInterval(load, 1500);
+</script>
+<p>Easiest: in the phone app tap <b>Find PC on this Wi-Fi</b> and allow it here. Otherwise:</p>
 <p>In the phone app enter the address and this code (valid 5 minutes, single use):</p>
 <div class=code>{p['code'][:4]} {p['code'][4:]}</div>
 {qr_block}
