@@ -128,9 +128,8 @@ CDP must bind **loopback only** (`127.0.0.1:9222`). The Hub dials CDP on the PC;
    # VERIFY_DRY_RUN=1 npm run watch:cdp   # match only, no pack write
    ```
 
-   Then restart the Hub and send a test message. Unlock path: [reports/sender-unlock-path-2026-09-25.md](reports/sender-unlock-path-2026-09-25.md).
+   Then restart the Hub and send a test message.
 
-See also the unblock section in [reports/cdp-probe-2026-09-25.md](reports/cdp-probe-2026-09-25.md).
 
 ### 3. Run the Hub
 

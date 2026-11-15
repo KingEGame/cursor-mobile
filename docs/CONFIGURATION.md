@@ -26,7 +26,7 @@
 | `CM_KEYSTORE_FILE` · `CM_KEYSTORE_PASSWORD` · `CM_KEY_ALIAS` · `CM_KEY_PASSWORD` | Optional (build time) | unset → template debug key | Release APK signing (`apps/mobile/plugins/with-release-signing.js`) | Phase 4 |
 | `HUB_DISPLAY_NAME` | Optional | machine hostname | Name the phone shows for this PC (Account → Computer, QR `name=`) | Phase 0 |
 | `WORKSPACE_POLL_MS` | Optional | TBD | Refresh interval for live workspace detect | DESIGNED |
-| `EXPO_PUBLIC_HUB_URL` | Optional (APK) | — | **Build-time default only** (baked into `extra.hubUrl`). Pair screen always accepts a runtime Hub URL and persists it in SecureStore — **rebuild not required** to point at Tailscale Hub. This PC (2026-09-30): `http://100.108.160.99:8787` / MagicDNS `http://kingwarpc-1.tail246b3f.ts.net:8787` (legacy `100.91.47.68` / `kingwarpc…` may be offline) | Phase 0 (`apps/mobile`) |
+| `EXPO_PUBLIC_HUB_URL` | Optional (APK) | — | **Build-time default only** (baked into `extra.hubUrl`). Pair screen always accepts a runtime Hub URL and persists it in SecureStore — **rebuild not required** to point at Tailscale Hub. This PC (2026-09-30): `http://100.64.0.1:8787` / MagicDNS `http://my-pc.example.ts.net:8787` | Phase 0 (`apps/mobile`) |
 
 ## Desktop Hub (Electron)
 

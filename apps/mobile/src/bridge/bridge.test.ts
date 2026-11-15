@@ -197,7 +197,7 @@ describe('client', () => {
 
 describe('errors & pairing payload', () => {
   it('explains failures in plain words', () => {
-    assert.match(describeError(new BridgeError(0, 'UNREACHABLE', 'x'), 'kingwarpc'), /Tailscale.*kingwarpc/);
+    assert.match(describeError(new BridgeError(0, 'UNREACHABLE', 'x'), 'my-pc'), /Tailscale.*my-pc/);
     assert.match(describeError(new BridgeError(400, 'PAIR_CODE_INVALID', 'x')), /127\.0\.0\.1:8097\/pair/);
     assert.match(describeError(new BridgeError(409, 'SESSION_BUSY', 'x'), 'pc'), /still working.*pc/);
   });
@@ -241,8 +241,8 @@ describe('network', () => {
     assert.equal(addressKind('http://192.168.12.66:8097'), 'lan');
     assert.equal(addressKind('http://10.42.0.1:8097'), 'lan');
     assert.equal(addressKind('http://172.20.0.5:8097'), 'lan');
-    assert.equal(addressKind('http://100.108.160.99:8097'), 'tailscale');
-    assert.equal(addressKind('http://kingwarpc-1.tail246b3f.ts.net:8097'), 'name');
+    assert.equal(addressKind('http://100.64.0.1:8097'), 'tailscale');
+    assert.equal(addressKind('http://my-pc.example.ts.net:8097'), 'name');
     assert.equal(addressKind('http://8.8.8.8:8097'), 'name');
   });
   it('ranks LAN → Tailscale IP → MagicDNS and dedupes', () => {

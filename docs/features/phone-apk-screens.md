@@ -9,9 +9,9 @@ Screen-by-screen specification for the **Android APK** companion. The app remote
 
 Related: [remote-sessions.md](./remote-sessions.md) · [new-session-composer.md](./new-session-composer.md) · [architecture](../architecture/mobile-cursor-companion.md)
 
-**Amendment F (2026-10-01):** away-from-PC comfort — see UI-SPEC § Amendment F and [comfort gap audit](../reports/mobile-ux-comfort-gap-audit-2026-10-01.md).
+**Amendment F (2026-10-01):** away-from-PC comfort — see UI-SPEC § Amendment F.
 
-**UI design contract (plan locked 2026-10-01):** [`.planning/phases/05-mobile-ux-contract/05-UI-SPEC.md`](../../.planning/phases/05-mobile-ux-contract/05-UI-SPEC.md) — all screens + Pair QR + Settings PC/Refresh + sync parity + build best practices. Prefer that file for visual/IA locks; keep this feature doc for screen behavior.
+**UI design contract (plan locked 2026-10-01):** the internal UI spec (not published) — all screens + Pair QR + Settings PC/Refresh + sync parity + build best practices. Prefer that file for visual/IA locks; keep this feature doc for screen behavior.
 
 ## Implemented vs planned (shell)
 

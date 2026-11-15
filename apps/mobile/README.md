@@ -19,11 +19,11 @@ HUB_HOST=<tailscale-ip> CURSOR_WORKSPACE=/data/projects/cursor_mobile npm run st
 curl -X POST http://127.0.0.1:8787/v1/pair/start -H 'Content-Type: application/json' -d '{}'
 
 # Terminal B — Expo (optional build-time default; Pair screen overrides at runtime)
-export EXPO_PUBLIC_HUB_URL="http://100.91.47.68:8787"
+export EXPO_PUBLIC_HUB_URL="http://100.64.0.1:8787"
 npm run start:mobile
 ```
 
-Hub URL is **editable on the Pair screen** and stored in SecureStore — rebuild not required to change host. This PC: `http://100.91.47.68:8787` or MagicDNS `http://kingwarpc.tail246b3f.ts.net:8787`.
+Hub URL is **editable on the Pair screen** and stored in SecureStore — rebuild not required to change host. Use your PC's Tailscale IP or MagicDNS name, e.g. `http://my-pc.example.ts.net:8787`.
 
 Typecheck / unit tests:
 
@@ -39,7 +39,6 @@ Sideload artifact (gitignored `android/` tree; debug-signed):
 
 `android/app/build/outputs/apk/release/app-release.apk`
 
-See [`docs/reports/apk-build-attempt-2026-09-25.md`](../../docs/reports/apk-build-attempt-2026-09-25.md). Rebuild: `npx expo prebuild --platform android` then `cd android && ./gradlew assembleRelease`.
 
 ## Product locks
 

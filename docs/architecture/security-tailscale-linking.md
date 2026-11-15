@@ -1,7 +1,7 @@
 <!-- generated-by: gsd-doc-writer -->
 # Architecture — Secure Phone ↔ PC Linking (Tailscale)
 
-**Status:** accepted security design (2026-09-24) · **Aligns with:** [AGENT-CONTEXT.md](./AGENT-CONTEXT.md) · [mobile-cursor-companion.md](./mobile-cursor-companion.md)  
+**Status:** accepted security design (2026-09-24) · [mobile-cursor-companion.md](./mobile-cursor-companion.md)  
 **Scope lock:** PC-local companion only — **no cloud mode**, **no public Hub/CDP**
 
 This document defines how the Android APK must reach the Hub on the PC without exposing Cursor, CDP, or Hub APIs to the LAN or the public internet.

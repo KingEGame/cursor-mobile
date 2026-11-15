@@ -25,3 +25,9 @@ apps/desktop/vendor/hub-bundle.mjs.map
 apps/desktop/vendor/hub-bundle.cjs
 apps/desktop/vendor/hub-bundle.cjs.map
 
+
+# Local agent / tooling state (not part of the product)
+.cursor/
+.planning/
+.claude/
+graphify-out/

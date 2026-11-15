@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Live E2E: start the bridge (real SessionStore, DB copy) and drive it with the app's own client code.
 set -u
-PY=${HERMES_PY:-/home/kingwar/.hermes/installs/cec2c3a4299eff54/environments/0b0a3d193df1479da3932830a8ba32ff/venv/bin/python}
+PY=${HERMES_PY:-python3}  # set HERMES_PY to the Hermes venv python (needs the gateway deps)
 PORT=${PORT:-18098}
 LOG=$(mktemp)
 "$PY" "$(cd "$(dirname "$0")/../../.." && pwd)/server/phone_bridge/e2e_server.py" "$PORT" >"$LOG" 2>&1 &

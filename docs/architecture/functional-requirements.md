@@ -3,7 +3,7 @@
 
 **Status:** accepted requirements (2026-09-24)  
 **Scope lock:** PC-local only — **no** Cursor Cloud Agents / Remote Control  
-**Related:** [AGENT-CONTEXT.md](./AGENT-CONTEXT.md) · [mobile-cursor-companion.md](./mobile-cursor-companion.md) · [remote-sessions.md](../features/remote-sessions.md)
+**Related:** [mobile-cursor-companion.md](./mobile-cursor-companion.md) · [remote-sessions.md](../features/remote-sessions.md)
 
 ## 1. Goals / non-goals
 

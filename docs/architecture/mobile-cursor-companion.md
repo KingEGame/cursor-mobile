@@ -3,7 +3,7 @@
 
 **Status:** accepted design (2026-09-24) · **Scope lock:** PC-local only — **no cloud mode**  
 **Goal:** Phone works **inside the project already open on the PC** — continue existing sessions or start new ones with **model choice, file attach, tools & plugins** — all executed by Cursor on that PC.  
-**Agent briefing (load first):** [AGENT-CONTEXT.md](./AGENT-CONTEXT.md) · **Rules:** [`../../AGENTS.md`](../../AGENTS.md)
+**Rules:** [`../../AGENTS.md`](../../AGENTS.md)
 
 ---
 
