@@ -35,6 +35,10 @@ flowchart LR
 - **One-tap pairing.** Tap the PC in the app → a notification + `http://127.0.0.1:8097/pair` show the
   phone with a 4-digit code → **Allow**. The code/QR flow still works (e.g. over Tailscale only).
   "Disconnect" in the app also revokes the token on the PC.
+- **Projects.** The same projects as the desktop sidebar (`hermes project ls`): browse each project's
+  sessions from every client, and **New chat in <project>** starts the agent with that project's folder
+  (a plugin system-prompt section tells it to work there and read its AGENTS.md). Sessions are matched to
+  projects by `cwd` / `git_repo_root` (after `realpath`, so `/data` and `/mnt/data` agree).
 - Gateway slash commands work from the phone (`/new`, `/stop`, `/model`, …).
 
 ## Set up

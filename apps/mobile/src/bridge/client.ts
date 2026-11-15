@@ -3,6 +3,8 @@
  */
 import type {
   Health,
+  Project,
+  ProjectRef,
   PairRequestResponse,
   PairRequestStatus,
   MessagesPage,
@@ -134,8 +136,15 @@ export class BridgeClient {
     return this.request('GET', `/v1/pair/request/${encodeURIComponent(requestId)}`, undefined, false);
   }
 
-  sessions(q: { limit?: number; before?: number | null; source?: string; all?: boolean } = {}): Promise<SessionsPage> {
+  projects(): Promise<{ items: Project[] }> {
+    return this.request('GET', '/v1/projects');
+  }
+
+  sessions(
+    q: { limit?: number; before?: number | null; source?: string; all?: boolean; project?: string } = {},
+  ): Promise<SessionsPage> {
     const qs = new URLSearchParams();
+    if (q.project) qs.set('project', q.project);
     if (q.limit) qs.set('limit', String(q.limit));
     if (q.before != null) qs.set('before', String(q.before));
     if (q.source) qs.set('source', q.source);
@@ -162,8 +171,9 @@ export class BridgeClient {
     return this.request('POST', '/v1/device/revoke', {});
   }
 
-  newChat(): Promise<{ chatId: string }> {
-    return this.request('POST', '/v1/chats', {});
+  /** A phone chat; with `project` the agent is told to work in that project's folder. */
+  newChat(project?: string): Promise<{ chatId: string; project: ProjectRef | null }> {
+    return this.request('POST', '/v1/chats', project ? { project } : {});
   }
 
   /** `clientMessageId` makes retries idempotent (the Gateway drops duplicates for 10 min). */

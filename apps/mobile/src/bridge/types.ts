@@ -45,6 +45,24 @@ export interface Session {
   preview: string | null;
   /** Phone may only write into sessions it started itself. */
   canSend: boolean;
+  /** Hermes project (desktop sidebar / `hermes project`) the session belongs to. */
+  project?: ProjectRef | null;
+}
+
+export interface ProjectRef {
+  slug: string;
+  name: string;
+}
+
+export interface Project extends ProjectRef {
+  icon: string | null;
+  color: string | null;
+  description: string | null;
+  /** Primary folder on the PC. */
+  path: string | null;
+  sessionCount: number;
+  workingCount: number;
+  updatedAt: string | null;
 }
 
 export interface SessionsPage {

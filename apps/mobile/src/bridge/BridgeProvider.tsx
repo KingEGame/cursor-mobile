@@ -50,7 +50,7 @@ interface BridgeApi {
   /** Load (or incrementally update) a session's messages and keep it live. */
   openSession: (sessionId: string) => Promise<void>;
   closeSession: (sessionId: string) => void;
-  newChat: () => Promise<string>;
+  newChat: (project?: string) => Promise<string>;
   send: (target: SendTarget, text: string) => Promise<void>;
   retry: (clientMessageId: string) => Promise<void>;
   discard: (clientMessageId: string) => void;
@@ -314,7 +314,7 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     setPairing((p) => ({ ...p, token: null, deviceId: null }));
   }, [client]);
 
-  const newChat = useCallback(async () => (await client.newChat()).chatId, [client]);
+  const newChat = useCallback(async (project?: string) => (await client.newChat(project)).chatId, [client]);
 
   const deliver = useCallback(
     async (target: SendTarget, text: string, id: string) => {

@@ -4,8 +4,10 @@ export type RootStackParamList = {
   /** Deep link / QR: `hermes-phone://pair?hubUrl=&code=&pairId=&name=` */
   Pair: { hubUrl?: string; code?: string; pairId?: string; name?: string } | undefined;
   Sessions: undefined;
+  Projects: undefined;
+  Project: { slug: string; name?: string };
   /** Existing session (`sessionId`) or a phone chat that may not have a session yet (`chatId`). */
-  Chat: { sessionId?: string; chatId?: string; title?: string };
+  Chat: { sessionId?: string; chatId?: string; title?: string; project?: string };
   Settings: undefined;
 };
 

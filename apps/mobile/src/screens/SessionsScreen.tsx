@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Plus, Settings } from 'lucide-react-native';
+import { FolderOpen, Plus, Settings } from 'lucide-react-native';
 import { useBridge, type Connection } from '../bridge/BridgeProvider';
 import { oneLine, relativeTime, sessionTitle, sourceLabel } from '../bridge/format';
 import type { Session } from '../bridge/types';
@@ -86,6 +86,12 @@ export function SessionsScreen({ navigation }: ScreenProps<'Sessions'>) {
       ) : null}
 
       <View style={styles.filters}>
+        <Pressable onPress={() => navigation.navigate('Projects')} style={styles.chip} testID="open-projects">
+          <View style={styles.chipRow}>
+            <FolderOpen size={14} color={colors.muted} />
+            <Text style={styles.chipText}>Projects</Text>
+          </View>
+        </Pressable>
         {(['all', 'phone', 'working'] as Filter[]).map((f) => (
           <Pressable
             key={f}
@@ -142,7 +148,7 @@ export function SessionsScreen({ navigation }: ScreenProps<'Sessions'>) {
   );
 }
 
-function SessionRow({ s, onPress }: { s: Session; onPress: () => void }) {
+export function SessionRow({ s, onPress, hideProject }: { s: Session; onPress: () => void; hideProject?: boolean }) {
   const working = s.status === 'working';
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surfaceMuted }]}>
@@ -156,6 +162,13 @@ function SessionRow({ s, onPress }: { s: Session; onPress: () => void }) {
         <View style={[styles.badge, s.source === 'phone' && styles.badgePhone]}>
           <Text style={[styles.badgeText, s.source === 'phone' && styles.badgeTextPhone]}>{sourceLabel(s.source)}</Text>
         </View>
+        {s.project && !hideProject ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText} numberOfLines={1}>
+              {s.project.name}
+            </Text>
+          </View>
+        ) : null}
         {working ? (
           <View style={styles.workingWrap}>
             <ActivityIndicator size="small" color={colors.accent} />
@@ -189,6 +202,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  chipRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   chipOn: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
   chipText: { fontSize: type.chip, color: colors.muted, fontWeight: weight.semibold },
   chipTextOn: { color: colors.accent },

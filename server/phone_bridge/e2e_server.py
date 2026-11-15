@@ -56,7 +56,7 @@ async def main() -> None:
     cfg = GatewayConfig()
     cfg.sessions_dir = TMP / "sessions"; cfg.sessions_dir.mkdir(exist_ok=True)
     runner = Runner(SessionStore(cfg.sessions_dir, cfg))
-    ad = PhoneBridgeAdapter(PlatformConfig(enabled=True, extra={
+    ad = PhoneBridgeAdapter(PlatformConfig(enabled=True, extra={"notify": False, 
         "port": PORT, "host": "127.0.0.1", "db_path": str(DB), "devices_path": str(TMP / "devices.json")}))
     ad.gateway_runner = runner
 

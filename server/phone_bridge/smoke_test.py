@@ -57,7 +57,7 @@ async def main() -> int:
     src.backup(dst); src.close()
     dst.execute("PRAGMA journal_mode=WAL"); dst.commit()
 
-    cfg = PlatformConfig(enabled=True, extra={"port": PORT, "host": "127.0.0.1",
+    cfg = PlatformConfig(enabled=True, extra={"notify": False, "port": PORT, "host": "127.0.0.1",
                                               "db_path": str(tmp / "state.db"),
                                               "devices_path": str(tmp / "devices.json")})
     ad = PhoneBridgeAdapter(cfg)
@@ -66,6 +66,7 @@ async def main() -> int:
         captured.append(event)
     ad.handle_message = fake_handle
     check("connect()", await ad.connect())
+    check("test server never pops desktop notifications", ad._notify is False)
     base = f"http://127.0.0.1:{PORT}"
     try:
         async with aiohttp.ClientSession() as http:
@@ -99,6 +100,31 @@ async def main() -> int:
 
             m = await (await http.get(f"{base}/v1/sessions/{first['id']}/messages?limit=3", headers=H)).json()
             check("messages tail", 0 < len(m["messages"]) <= 3, f"{len(m['messages'])} msgs")
+
+            # ---- projects (real ~/.hermes/projects.db, read-only) ----------
+            pj = await (await http.get(f"{base}/v1/projects", headers=H)).json()
+            slugs = {x["slug"]: x for x in pj["items"]}
+            check("projects listed from projects.db", "hub-app" in slugs and slugs["hub-app"]["path"], f"{len(slugs)} projects")
+            hub = await (await http.get(f"{base}/v1/sessions?project=hub-app&limit=50", headers=H)).json()
+            check("project filter matches /mnt/data vs /data spellings (realpath)",
+                  hub["items"] and all(i["project"]["slug"] == "hub-app" for i in hub["items"]), f"{len(hub['items'])} sessions")
+            check("project session count agrees with filter", slugs["hub-app"]["sessionCount"] == len(hub["items"]))
+            anyp = await (await http.get(f"{base}/v1/sessions?limit=50", headers=H)).json()
+            check("plain list carries project tags", any(i.get("project") for i in anyp["items"]) and "_cwd" not in anyp["items"][0])
+            nc = await http.post(f"{base}/v1/chats", headers=H, json={"project": "hub-app"})
+            ncj = await nc.json()
+            check("new chat inside a project", nc.status == 201 and ncj["project"]["slug"] == "hub-app")
+            nc404 = await http.post(f"{base}/v1/chats", headers=H, json={"project": "no-such-project"})
+            check("unknown project -> 404", nc404.status == 404, str(nc404.status))
+            from phone_bridge.adapter import _project_prompt_section, _is_home_channel_nag
+            ad._chat_projects.set_session("smoke_proj_sid", "hub-app")
+            sec = _project_prompt_section({"platform": "phone", "session_id": "smoke_proj_sid"})
+            check("system-prompt section names the project folder", "Hub APP" in sec and "/data/projects/cursor_mobile" in sec, sec[:60])
+            check("no section for other platforms / unknown chats",
+                  _project_prompt_section({"platform": "telegram", "session_id": "smoke_proj_sid"}) == ""
+                  and _project_prompt_section({"platform": "phone", "session_id": "nope"}) == "")
+            check("home-channel hint is filtered", _is_home_channel_nag("\U0001F4EC No home channel is set for Phone. Type /sethome …")
+                  and not _is_home_channel_nag("hello /sethome"))
 
             # ---- websocket: live push + status + replay -------------------
             cursor0 = (await (await http.get(f"{base}/v1/health")).json())["cursor"]

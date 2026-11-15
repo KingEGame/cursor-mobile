@@ -83,7 +83,7 @@ export function PairScreen({ navigation, route }: ScreenProps<'Pair'>) {
   };
 
   useEffect(() => {
-    if (!route.params?.code) void findPcs();
+    void findPcs(); // even when opened from a (possibly stale) pairing link
     return () => {
       cancelAsk.current = true;
     };
@@ -187,7 +187,7 @@ export function PairScreen({ navigation, route }: ScreenProps<'Pair'>) {
                 </Pressable>
               ))}
               <Text style={styles.hint}>
-                {scan === 'scanning'
+                {scan === 'scanning' || scan === 'idle'
                   ? 'Looking for Hermes on your network…'
                   : scan === 'nowifi'
                     ? 'Not on Wi-Fi. Use the code below (works over Tailscale too).'

@@ -62,11 +62,15 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
           <Text style={styles.hTitle} numberOfLines={1}>
             {session ? sessionTitle(session) : (route.params.title ?? 'New chat')}
           </Text>
-          <Text style={styles.hSub}>{session ? sourceLabel(session.source) : 'Phone'}</Text>
+          <Text style={styles.hSub} numberOfLines={1}>
+            {[session ? sourceLabel(session.source) : 'Phone', session?.project?.name ?? route.params.project]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
         </View>
       ),
     });
-  }, [navigation, session, route.params.title]);
+  }, [navigation, session, route.params.title, route.params.project]);
 
   const rows: Row[] = useMemo(() => {
     const base: Row[] = buildTranscript(messages ?? []);

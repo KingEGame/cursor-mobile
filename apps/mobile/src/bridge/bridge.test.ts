@@ -349,3 +349,43 @@ describe('one-tap pairing client', () => {
     ]);
   });
 });
+
+describe('projects', () => {
+  it('hides session_meta and other bookkeeping rows from the transcript', () => {
+    const items = buildTranscript([
+      msg(1, { role: 'user', content: 'hi' }),
+      msg(2, { content: 'hello' }),
+      msg(3, { role: 'session_meta' as Message['role'], content: '' }),
+      msg(4, { role: 'system', content: 'sys' }),
+    ]);
+    assert.deepEqual(items.map((i) => i.key), ['m1', 'm2']);
+  });
+
+  it('lists projects, filters sessions and opens a chat inside a project', async () => {
+    const calls: string[] = [];
+    const c = new BridgeClient({
+      baseUrl: 'http://pc:8097',
+      token: 't',
+      fetchImpl: (async (u: unknown, init?: RequestInit) => {
+        calls.push(`${init?.method} ${String(u)} ${init?.body ?? ''}`);
+        const url = String(u);
+        const body = url.endsWith('/v1/projects')
+          ? { items: [{ slug: 'hub-app', name: 'Hub APP' }] }
+          : url.includes('/v1/chats')
+            ? { chatId: 'p_1', project: { slug: 'hub-app', name: 'Hub APP' } }
+            : { items: [], nextBefore: null, cursor: 0 };
+        return new Response(JSON.stringify(body), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal((await c.projects()).items[0]!.slug, 'hub-app');
+    await c.sessions({ project: 'hub-app', limit: 100 });
+    assert.equal((await c.newChat('hub-app')).project?.name, 'Hub APP');
+    await c.newChat();
+    assert.deepEqual(calls, [
+      'GET http://pc:8097/v1/projects ',
+      'GET http://pc:8097/v1/sessions?project=hub-app&limit=100 ',
+      'POST http://pc:8097/v1/chats {"project":"hub-app"}',
+      'POST http://pc:8097/v1/chats {}',
+    ]);
+  });
+});

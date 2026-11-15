@@ -72,7 +72,9 @@ export function buildTranscript(messages: Message[]): ChatItem[] {
     }
   };
   for (const m of messages) {
-    if (m.role === 'system') continue;
+    // Only conversation roles render; `system`, `session_meta` and other bookkeeping rows stay hidden.
+    if (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'tool') continue;
+    if (m.role === 'user' && !m.content.trim()) continue;
     if (m.role === 'tool') {
       if (!run) addTools(m.id, []);
       continue; // results are counted via the assistant's toolCalls

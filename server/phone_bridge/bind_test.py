@@ -73,7 +73,7 @@ async def main():
     store = SessionStore(cfg.sessions_dir, cfg)
     runner = Runner(store)
     port = 18099
-    ad = PhoneBridgeAdapter(PlatformConfig(enabled=True, extra={
+    ad = PhoneBridgeAdapter(PlatformConfig(enabled=True, extra={"notify": False, 
         "port": port, "host": "127.0.0.1", "db_path": str(TMP / "state.db"), "devices_path": str(TMP / "devices.json")}))
     ad.gateway_runner = runner
     events = []

@@ -9,19 +9,23 @@ import { LockGate } from './src/components/LockGate';
 import type { RootStackParamList } from './src/navigation/types';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { PairScreen } from './src/screens/PairScreen';
+import { ProjectScreen } from './src/screens/ProjectScreen';
+import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import { SessionsScreen } from './src/screens/SessionsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { colors } from './src/theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-/** `hermes-phone://pair?hubUrl=…&code=…`, `hermes-phone://session/<id>`, `hermes-phone://sessions`. */
+/** `hermes-phone://pair?hubUrl=…&code=…`, `hermes-phone://session/<id>`, `hermes-phone://sessions`, `hermes-phone://projects`, `hermes-phone://project/<slug>`. */
 const linking: LinkingOptions<RootStackParamList> = {
   prefixes: ['hermes-phone://'],
   config: {
     screens: {
       Pair: 'pair',
       Sessions: 'sessions',
+      Projects: 'projects',
+      Project: 'project/:slug',
       Chat: 'session/:sessionId',
       Settings: 'settings',
     },
@@ -63,6 +67,8 @@ function Root() {
         >
           <Stack.Screen name="Pair" component={PairScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Sessions" component={SessionsScreen} options={{ title: 'Hermes' }} />
+          <Stack.Screen name="Projects" component={ProjectsScreen} options={{ title: 'Projects' }} />
+          <Stack.Screen name="Project" component={ProjectScreen} options={{ title: 'Project' }} />
           <Stack.Screen name="Chat" component={ChatScreen} options={{ title: 'Chat' }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
         </Stack.Navigator>

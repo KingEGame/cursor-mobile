@@ -45,6 +45,11 @@ from gateway.platforms.event import MessageEvent, MessageType
 from gateway.platforms.helpers import MessageDeduplicator
 from gateway.platforms._shared import get_scoped_secret as _secret
 
+try:
+    from .projects import ChatProjects, ProjectIndex, prompt_section
+except ImportError:  # loaded as a top-level module (tests)
+    from projects import ChatProjects, ProjectIndex, prompt_section  # type: ignore[no-redef]
+
 logger = logging.getLogger(__name__)
 
 API_VERSION = 1
@@ -58,6 +63,8 @@ REPLAY_LIMIT = 2000
 # Sessions that are internal plumbing, hidden from the phone list unless ?all=1.
 HIDDEN_SOURCES = ("subagent", "oneshot", "kanban")
 _TRUTHY = ("1", "true", "yes", "on")
+# The live adapter (one gateway process = one phone bridge); used by the prompt-section callback.
+_ACTIVE: Optional["PhoneBridgeAdapter"] = None
 
 
 def _truthy(value: Any) -> bool:
@@ -212,8 +219,12 @@ class StateReader:
         if before:
             where.append("COALESCE((SELECT MAX(timestamp) FROM messages m WHERE m.session_id = s.id), s.started_at) < ?")
             args.append(before)
+        with self._conn() as c:
+            cols = self._session_cols(c)
+        path_cols = ", ".join(f"s.{k}" if k in cols else f"NULL AS {k}" for k in ("cwd", "git_repo_root"))
         sql = f"""
             SELECT s.id, s.source, s.chat_id, s.session_key, COALESCE(s.title, s.display_name) AS display_name, s.started_at, s.ended_at,
+                   {path_cols},
                    s.end_reason, s.message_count, s.model,
                    COALESCE((SELECT MAX(timestamp) FROM messages m WHERE m.session_id = s.id), s.started_at) AS last_ts,
                    (SELECT role FROM messages m WHERE m.session_id = s.id AND m.active = 1
@@ -235,7 +246,7 @@ class StateReader:
                 "lastRole": r["last_role"], "preview": r["preview"],
                 # Any visible session can be continued from the phone (internal plumbing cannot).
                 "canSend": r["source"] not in HIDDEN_SOURCES,
-                "_ts": r["last_ts"],
+                "_ts": r["last_ts"], "_cwd": r["cwd"], "_root": r["git_repo_root"],
             })
         return out
 
@@ -315,6 +326,13 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         self._addresses: list[str] = []
         self._addresses_at = 0.0
         self._started = time.time()
+        # Desktop notification for one-tap pairing; tests/e2e servers turn it off (they share this desktop).
+        self._notify = _truthy(extra.get("notify", True))
+        self._notify_id: Optional[str] = None
+        self._projects = ProjectIndex()
+        self._chat_projects = ChatProjects(Path(extra.get("projects_path") or home / "phone_bridge" / "projects.json"))
+        global _ACTIVE
+        _ACTIVE = self
 
     # lifecycle ------------------------------------------------------------
     async def connect(self, *, is_reconnect: bool = False) -> bool:
@@ -328,6 +346,7 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
             r.add_get("/v1/health", self._h_health)
             r.add_post("/v1/pair/start", self._h_pair_start)
             r.add_post("/v1/pair/complete", self._h_pair_complete)
+            r.add_get("/v1/projects", self._h_projects)
             r.add_get("/v1/sessions", self._h_sessions)
             r.add_get("/v1/sessions/{sid}", self._h_session)
             r.add_get("/v1/sessions/{sid}/messages", self._h_messages)
@@ -394,6 +413,9 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         # Persisted replies reach the phone through the DB poller (woken now); everything the gateway
         # sends is also pushed live, so streaming previews and command replies show up immediately.
         live_id = uuid.uuid4().hex[:12]
+        if _is_home_channel_nag(content):
+            # Cron results must not land on a phone by accident; the hint is noise in every new chat.
+            return SendResult(success=True, message_id=live_id)
         await self._live(chat_id, live_id, content or "")
         self._wake.set()
         return SendResult(success=True, message_id=live_id)
@@ -533,14 +555,21 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         self._pair_requests = {k: v for k, v in self._pair_requests.items()
                                if v["expires"] > now or v["status"] == "approved" and v["expires"] + 60 > now}
 
-    def _notify_pc(self, name: str, confirm: str) -> None:
+    def _notify_pc(self, name: str, confirm: str, ip: str = "") -> None:
+        """One normal-urgency notification that REPLACES the previous one (never a growing stack),
+        expiring with the request. Off for test servers."""
         import shutil, subprocess
-        if not shutil.which("notify-send"):
+        if not self._notify or not shutil.which("notify-send"):
             return
+        cmd = ["notify-send", "-a", "Hermes", "-u", "normal", "-t", str(PAIR_REQUEST_TTL_S * 1000), "-p"]
+        if self._notify_id:
+            cmd += ["-r", self._notify_id]
+        cmd += ["Hermes Phone: connection request",
+                f"{name}{f' ({ip})' if ip else ''} wants to connect — code {confirm}.\n"
+                f"Allow on http://127.0.0.1:{self._port}/pair (ignore it if this isn't your phone)."]
         try:
-            subprocess.Popen(["notify-send", "-a", "Hermes", "-u", "critical", "Hermes Phone",
-                              f"{name} wants to connect — code {confirm}.\nOpen http://127.0.0.1:{self._port}/pair to allow."],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=3).stdout.strip()
+            self._notify_id = out if out.isdigit() else self._notify_id
         except Exception:
             pass
 
@@ -572,7 +601,7 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
                                     "appVersion": str(body.get("appVersion", ""))[:20], "ip": request.remote,
                                     "confirm": confirm, "created": now, "expires": now + PAIR_REQUEST_TTL_S,
                                     "status": "pending", "result": None}
-        self._notify_pc(name, confirm)
+        await asyncio.to_thread(self._notify_pc, name, confirm, request.remote or "")
         logger.info("[phone] pairing request from %s (%s), code %s", name, request.remote, confirm)
         return web.json_response({"requestId": rid, "confirm": confirm, "expiresAt": _iso(now + PAIR_REQUEST_TTL_S),
                                   "hub": await self._hub_info()}, status=201)
@@ -616,6 +645,45 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         logger.info("[phone] pairing request %s: %s", r["name"], r["status"])
         return web.json_response({"ok": True, "status": r["status"]})
 
+    # projects ---------------------------------------------------------------
+    def _project_of(self, item: dict[str, Any]) -> Optional[str]:
+        return (self._chat_projects.session(item["id"])
+                or (self._chat_projects.chat(item.get("chatId")) if item.get("source") == "phone" else None)
+                or self._projects.for_path(item.get("_root"), item.get("_cwd")))
+
+    def _annotate(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for i in items:
+            slug = self._project_of(i)
+            p = self._projects.get(slug)
+            i["project"] = {"slug": p["slug"], "name": p["name"]} if p else None
+            i.pop("_cwd", None); i.pop("_root", None)
+        return items
+
+    def _all_annotated(self) -> list[dict[str, Any]]:
+        return self._annotate(self._state.list_sessions(5000, None, None, False))
+
+    async def _h_projects(self, request: "web.Request") -> "web.Response":
+        projects = await asyncio.to_thread(self._projects.list)
+        sessions = await asyncio.to_thread(self._all_annotated)
+        stats: dict[str, dict[str, Any]] = {}
+        for s in sessions:
+            if s["project"]:
+                st = stats.setdefault(s["project"]["slug"], {"count": 0, "last": 0.0, "working": 0})
+                st["count"] += 1
+                st["last"] = max(st["last"], s["_ts"] or 0)
+                st["working"] += s["status"] == "working"
+        out = []
+        for p in projects:
+            st = stats.get(p["slug"], {"count": 0, "last": 0.0, "working": 0})
+            out.append({"slug": p["slug"], "name": p["name"], "icon": p.get("icon"), "color": p.get("color"),
+                        "description": p.get("description"), "path": p.get("path"),
+                        "sessionCount": st["count"], "workingCount": st["working"],
+                        "updatedAt": _iso(st["last"]) if st["last"] else None, "_last": st["last"]})
+        out.sort(key=lambda p: (-p["_last"], p["name"].lower()))
+        for p in out:
+            p.pop("_last", None)
+        return web.json_response({"items": out})
+
     async def _h_sessions(self, request: "web.Request") -> "web.Response":
         q = request.query
         try:
@@ -623,7 +691,15 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
             before = float(q["before"]) if q.get("before") else None
         except ValueError:
             return self._err(400, "VALIDATION_ERROR", "bad limit/before")
-        items = await asyncio.to_thread(self._state.list_sessions, limit, before, q.get("source"), q.get("all") == "1")
+        project = q.get("project")
+        if project:
+            def _filtered() -> list[dict[str, Any]]:
+                rows = self._annotate(self._state.list_sessions(5000, before, q.get("source"), q.get("all") == "1"))
+                return [r for r in rows if r["project"] and r["project"]["slug"] == project][:limit]
+            items = await asyncio.to_thread(_filtered)
+        else:
+            items = await asyncio.to_thread(
+                lambda: self._annotate(self._state.list_sessions(limit, before, q.get("source"), q.get("all") == "1")))
         next_before = items[-1]["_ts"] if len(items) == limit else None
         for i in items:
             i.pop("_ts", None)
@@ -633,6 +709,7 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         s = await asyncio.to_thread(self._state.get_session, request.match_info["sid"])
         if not s:
             return self._err(404, "SESSION_NOT_FOUND", "no such session")
+        self._annotate([s])
         s.pop("_ts", None)
         return web.json_response(s)
 
@@ -736,7 +813,40 @@ load(); setInterval(load, 1500);
         return web.Response(text=html, content_type="text/html")
 
     async def _h_new_chat(self, request: "web.Request") -> "web.Response":
-        return web.json_response({"chatId": f"p_{uuid.uuid4().hex[:16]}"}, status=201)
+        try:
+            body = await request.json() if request.can_read_body else {}
+        except ValueError:
+            body = {}
+        chat_id = f"p_{uuid.uuid4().hex[:16]}"
+        slug = str((body or {}).get("project") or "").strip()
+        project = None
+        if slug:
+            p = await asyncio.to_thread(self._projects.get, slug)
+            if not p:
+                self._projects.invalidate()   # created on the PC a moment ago?
+                p = await asyncio.to_thread(self._projects.get, slug)
+            if not p:
+                return self._err(404, "PROJECT_NOT_FOUND", f"no project {slug!r}")
+            self._chat_projects.set_chat(chat_id, p["slug"])
+            project = {"slug": p["slug"], "name": p["name"]}
+        return web.json_response({"chatId": chat_id, "project": project}, status=201)
+
+    async def _remember_project_session(self, source: Any, slug: str) -> None:
+        """Learn which session this project chat maps to BEFORE the agent builds its system prompt, so the
+        prompt section can name the project (the gateway resolves the same entry right after us)."""
+        runner = getattr(self, "gateway_runner", None)
+        store = getattr(runner, "async_session_store", None)
+        if store is None:
+            return
+        try:
+            if hasattr(runner, "_normalize_source_for_session_key"):
+                source = await asyncio.to_thread(runner._normalize_source_for_session_key, source)
+            entry = await store.get_or_create_session(source)
+            sid = getattr(entry, "session_id", None)
+            if sid:
+                self._chat_projects.set_session(sid, slug)
+        except Exception as e:
+            logger.debug("[phone] project pre-resolve failed: %s", e)
 
     async def _h_send(self, request: "web.Request") -> "web.Response":
         chat_id = request.match_info["chat_id"]
@@ -754,6 +864,9 @@ load(); setInterval(load, 1500);
         source = self.build_source(chat_id=chat_id, chat_name=f"phone:{chat_id[:8]}", chat_type="dm",
                                    user_id=device_id, user_name=self._devices.device_name(device_id),
                                    message_id=msg_id)
+        slug = self._chat_projects.chat(chat_id)
+        if slug:
+            await self._remember_project_session(source, slug)
         mtype = MessageType.COMMAND if text.startswith("/") else MessageType.TEXT
         event = MessageEvent(text=text, message_type=mtype, source=source, message_id=msg_id,
                              raw_message={"device": device_id})
@@ -889,6 +1002,25 @@ load(); setInterval(load, 1500);
 
 # ── plugin registration ─────────────────────────────────────────────────────
 
+def _is_home_channel_nag(content: Optional[str]) -> bool:
+    t = (content or "").lstrip()
+    return t.startswith("\U0001F4EC") and "/sethome" in t
+
+
+def _project_prompt_section(info: Any) -> str:
+    """Frozen into each NEW phone session's system prompt: which project the chat was started in."""
+    ad = _ACTIVE
+    if ad is None or str(info.get("platform") or "") != "phone":
+        return ""
+    sid = str(info.get("session_id") or "")
+    slug = ad._chat_projects.session(sid)
+    if not slug:
+        row = ad._state.session_row(sid) if sid else None
+        slug = ad._chat_projects.chat(row["chat_id"]) if row else None
+    p = ad._projects.get(slug)
+    return prompt_section(p) if p else ""
+
+
 def check_requirements() -> bool:
     return AIOHTTP_AVAILABLE
 
@@ -922,3 +1054,7 @@ def register(ctx) -> None:
         platform_hint=("You are talking to the user through their phone app. Replies are shown in a chat UI; "
                        "keep them concise. The same conversation is also available on their PC."),
     )
+    try:
+        ctx.register_system_prompt_section("phone-bridge.project", _project_prompt_section, max_chars=2000)
+    except Exception as e:  # older Hermes without prompt sections: projects still list, just no context
+        logger.info("[phone] project prompt section unavailable: %s", e)
