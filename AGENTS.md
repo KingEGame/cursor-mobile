@@ -34,3 +34,9 @@ stream previews, tool progress, command replies — dropped when the persisted m
 
 - Test/e2e bridge servers must pass `extra={"notify": False}`: they share the desktop, and every pairing request
   otherwise pops a real "Hermes Phone" notification on the PC.
+- Android package is `local.hermes.phone` since 0.4.0 (was `local.cursor.mobile`): the first 0.4.0 install is a
+  fresh app — uninstall the old one and pair again.
+- `apps/mobile/modules/hermes-background` is a local Expo module (Kotlin foreground service, type
+  `remoteMessaging`); it notifies only for `session.updated` idle events whose `source` is `phone`.
+- Messages accept multipart (`text`, `clientMessageId`, `file` parts; ≤10 files, 25 MB) → `cache_media_bytes`
+  → `MessageEvent.media_urls`.

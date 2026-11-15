@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SecurityCard } from '../components/SecurityCard';
 import { appVersion, useBridge } from '../bridge/BridgeProvider';
 import type { ScreenProps } from '../navigation/types';
@@ -61,6 +61,24 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
         </Pressable>
       </View>
 
+      <Text style={styles.section}>Notifications</Text>
+      <View style={styles.card}>
+        <View style={styles.row}>
+          <Text style={[styles.rowLabel, { flex: 1, color: colors.text }]}>Notify when Hermes replies</Text>
+          <Switch
+            value={bridge.backgroundNotify}
+            onValueChange={(v) => void bridge.setBackgroundNotify(v)}
+            disabled={!bridge.backgroundAvailable}
+            testID="bg-notify"
+          />
+        </View>
+        <Text style={styles.note}>
+          {bridge.backgroundAvailable
+            ? 'Keeps a quiet connection to the PC while the app is closed and notifies you when a chat from this phone gets an answer. Android shows a silent "connected" notification while it runs.'
+            : 'Not available in this build.'}
+        </Text>
+      </View>
+
       <Text style={styles.section}>Security</Text>
       <SecurityCard />
 
@@ -105,6 +123,7 @@ const styles = StyleSheet.create({
   rowLabel: { fontSize: type.body, color: colors.muted },
   rowValue: { flexShrink: 1, fontSize: type.body, color: colors.text, textAlign: 'right' },
   mono: { fontFamily: 'monospace', fontSize: type.meta },
+  note: { fontSize: type.meta, color: colors.muted, lineHeight: 18 },
   error: { color: colors.dangerText, fontSize: type.meta, lineHeight: 18 },
   button: {
     minHeight: 44,

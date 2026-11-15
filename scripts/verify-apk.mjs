@@ -12,7 +12,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-export const PACKAGE = "local.cursor.mobile";
+export const PACKAGE = "local.hermes.phone";
 
 /** Pure checks on `aapt2 dump badging` + `aapt2 dump xmltree` output. */
 export function checkApkDump({ badging, manifestTree }, expectedVersionCode) {

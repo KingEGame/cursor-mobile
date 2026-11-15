@@ -2,7 +2,7 @@
  * Pure, testable mirror of the PC's state.db as seen by the phone.
  * Every mutation goes through these functions; React only holds the resulting object.
  */
-import type { Message, Session, SessionStatus, WsLiveUpdate, WsServerEvent } from './types';
+import type { Attachment, Message, Session, SessionStatus, WsLiveUpdate, WsServerEvent } from './types';
 
 export type OutboxState = 'sending' | 'sent' | 'failed';
 
@@ -13,6 +13,8 @@ export interface OutboxItem {
   /** Existing session being continued (any source). */
   sessionId: string | null;
   text: string;
+  /** Files sent with the message (shown on the pending bubble; resent on retry). */
+  attachments?: Attachment[];
   state: OutboxState;
   createdAt: number;
   /** Mirror cursor when queued — only later user messages can confirm it. */

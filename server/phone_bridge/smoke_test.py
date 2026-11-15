@@ -123,6 +123,14 @@ async def main() -> int:
             check("project choice stays in the test store", "smoke_proj_sid" in (tmp / "projects.json").read_text())
             sec = _project_prompt_section({"platform": "phone", "session_id": "smoke_proj_sid"})
             check("system-prompt section names the project folder", "Hub APP" in sec and "/data/projects/cursor_mobile" in sec, sec[:60])
+            from phone_bridge.adapter import _pin_project_cwd
+            from tools.terminal_tool import get_session_cwd, clear_session_cwd
+            _pin_project_cwd(tool_name="terminal", args={}, task_id="smoke_proj_sid", session_id="smoke_proj_sid")
+            pinned = get_session_cwd("smoke_proj_sid")
+            check("project session works in the project folder", pinned == slugs["hub-app"]["path"], str(pinned))
+            clear_session_cwd("smoke_proj_sid")
+            _pin_project_cwd(tool_name="terminal", args={}, task_id="other_sid", session_id="other_sid")
+            check("other sessions keep their cwd", get_session_cwd("other_sid") is None)
             check("no section for other platforms / unknown chats",
                   _project_prompt_section({"platform": "telegram", "session_id": "smoke_proj_sid"}) == ""
                   and _project_prompt_section({"platform": "phone", "session_id": "nope"}) == "")
@@ -163,6 +171,7 @@ async def main() -> int:
                                                         and e["status"] == "idle")
             check("ws pushes status=idle when turn finished", su is not None,
                   "got: " + ",".join(f"{e['type']}:{e.get('sessionId','')[:12]}:{e.get('status','')}" for e in seen2[-5:]))
+            check("status events carry source for phone notifications", su and su.get("source") == "phone")
             check("idle event carries last message", su and (su.get("lastMessage") or {}).get("content") == "готово")
             await ws.close()
 
@@ -188,9 +197,36 @@ async def main() -> int:
             check("send accepted 202", r.status == 202, str(r.status))
             check("inbound event reaches gateway", len(captured) == 1 and captured[0].text == "что нового?"
                   and captured[0].source.platform.value == "phone" and captured[0].source.chat_id == chat)
+            # attachments: a real PNG + a text file, multipart like the app sends
+            import base64, zlib, struct
+            def _png():
+                raw = b"\x00\xff\x00\x00"
+                chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+                return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+                        + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+            fd = aiohttp.FormData()
+            fd.add_field("text", "что на фото?")
+            fd.add_field("clientMessageId", "att1")
+            fd.add_field("file", _png(), filename="shot.png", content_type="image/png")
+            fd.add_field("file", b"line1\nline2\n", filename="log.txt", content_type="text/plain")
+            n0 = len(captured)
+            ra = await http.post(f"{base}/v1/chats/{chat}/messages", headers=H, data=fd)
+            await asyncio.sleep(0.3)
+            ev = captured[-1] if len(captured) > n0 else None
+            check("multipart upload accepted", ra.status == 202, str(ra.status))
+            check("photo + file reach the agent as cached media",
+                  ev is not None and ev.message_type.value == "photo" and len(ev.media_urls) == 2
+                  and all(os.path.exists(u) for u in ev.media_urls) and ev.media_types[0] == "image/png",
+                  str(ev and (ev.message_type, ev.media_types)))
+            check("document path is noted for the agent", ev is not None and "log.txt" in ev.text and "что на фото?" in ev.text)
+            fd2 = aiohttp.FormData(); fd2.add_field("file", b"<html>not an image</html>", filename="x.png", content_type="image/png")
+            bad = await http.post(f"{base}/v1/chats/{chat}/messages", headers=H, data=fd2)
+            check("fake image rejected", bad.status == 400, str(bad.status))
+            empty = await http.post(f"{base}/v1/chats/{chat}/messages", headers=H, json={"text": " "})
+            check("empty message rejected", empty.status == 400, str(empty.status))
             dup = await (await http.post(f"{base}/v1/chats/{chat}/messages", headers=H,
                                          json={"text": "что нового?", "clientMessageId": "c1"})).json()
-            check("duplicate clientMessageId deduped", dup.get("duplicate") is True and len(captured) == 1)
+            check("duplicate clientMessageId deduped", dup.get("duplicate") is True and len(captured) == 2)  # first text + the attachment message
             await http.post(f"{base}/v1/chats/{chat}/messages", headers=H, json={"text": "/stop"})
             await asyncio.sleep(0.2)
             check("slash command passes through as COMMAND", captured[-1].message_type.value == "command",

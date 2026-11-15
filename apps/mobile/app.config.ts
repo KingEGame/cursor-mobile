@@ -28,7 +28,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   return {
     ...config,
     name: config.name ?? 'Hermes Phone',
-    slug: config.slug ?? 'cursor-mobile',
+    slug: config.slug ?? 'hermes-phone',
     version,
     android: {
       ...config.android,

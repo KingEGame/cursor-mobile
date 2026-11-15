@@ -2,7 +2,9 @@
  * One provider for the whole app: pairing, live socket, mirrored sessions/messages, outbox.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, PermissionsAndroid, Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import { HermesBackground } from '../../modules/hermes-background';
 import Constants from 'expo-constants';
 import { BridgeClient, isBridgeError, newClientMessageId } from './client';
 import {
@@ -18,7 +20,7 @@ import {
 } from './mirror';
 import { clearPairingToken, loadPairing, savePairing, type Pairing } from './pairing';
 import { BridgeSocket, type SocketState } from './socket';
-import type { Health, PairCompleteResponse, Session } from './types';
+import type { Attachment, Health, PairCompleteResponse, Session } from './types';
 import { describeError } from './errors';
 import { addressKind, mergeAddresses, pickBest, type AddressKind } from './network';
 
@@ -51,9 +53,13 @@ interface BridgeApi {
   openSession: (sessionId: string) => Promise<void>;
   closeSession: (sessionId: string) => void;
   newChat: (project?: string) => Promise<string>;
-  send: (target: SendTarget, text: string) => Promise<void>;
+  send: (target: SendTarget, text: string, attachments?: Attachment[]) => Promise<void>;
   retry: (clientMessageId: string) => Promise<void>;
   discard: (clientMessageId: string) => void;
+  /** Background "Hermes replied" notifications while the app is closed (Android foreground service). */
+  backgroundNotify: boolean;
+  backgroundAvailable: boolean;
+  setBackgroundNotify: (on: boolean) => Promise<void>;
   /** Re-probe all known PC addresses and switch to the best reachable one. */
   reresolve: () => Promise<string | null>;
   /** Wait until a phone chat has become a Hermes session (first agent pickup). */
@@ -64,6 +70,14 @@ const Ctx = createContext<BridgeApi | null>(null);
 const PAGE = 50;
 const emptyPairing: Pairing = { baseUrl: '', addresses: [], token: null, deviceId: null, pcName: null, hubId: null };
 const PROBE_TIMEOUT_MS = 2500;
+const BG_KEY = 'bg_notify';
+
+async function ensureNotificationPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android' || (Platform.Version as number) < 33) return true;
+  const perm = 'android.permission.POST_NOTIFICATIONS' as const;
+  if (await PermissionsAndroid.check(perm)) return true;
+  return (await PermissionsAndroid.request(perm)) === PermissionsAndroid.RESULTS.GRANTED;
+}
 
 export function BridgeProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -76,6 +90,7 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
   const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [activeUrl, setActiveUrl] = useState('');
   const resolving = useRef<Promise<string | null> | null>(null);
+  const [backgroundNotify, setBgNotify] = useState(true);
   const mirrorRef = useRef<MirrorState>(emptyMirror);
   const openSessions = useRef(new Set<string>());
   const socketRef = useRef<BridgeSocket | null>(null);
@@ -275,8 +290,35 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(t);
   }, [mirror.needsSessionRefresh, refreshSessions]);
 
+  // Background notifications: preference + service lifecycle follow the pairing.
+  useEffect(() => {
+    void SecureStore.getItemAsync(BG_KEY).then((v) => setBgNotify(v !== '0'));
+    HermesBackground.setForeground(AppState.currentState === 'active');
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !HermesBackground.available) return;
+    if (!pairing.token || !backgroundNotify) {
+      HermesBackground.stop();
+      return;
+    }
+    const urls = mergeAddresses([baseUrl], pairing.addresses);
+    // the service tries `urls` in this order; the address in use right now goes first
+    const ordered = [baseUrl, ...urls.filter((u) => u !== baseUrl)].filter(Boolean);
+    void ensureNotificationPermission().then(() =>
+      HermesBackground.configure(ordered, pairing.token!, pairing.pcName ?? 'PC'),
+    );
+  }, [ready, pairing.token, pairing.addresses, pairing.pcName, baseUrl, backgroundNotify]);
+
+  const setBackgroundNotify = useCallback(async (on: boolean) => {
+    if (on) await ensureNotificationPermission();
+    await SecureStore.setItemAsync(BG_KEY, on ? '1' : '0');
+    setBgNotify(on);
+  }, []);
+
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
+      HermesBackground.setForeground(st === 'active');
       if (st !== 'active') return;
       // Back in the app: networks may have changed (home Wi-Fi ↔ mobile + Tailscale).
       void reresolve().then(() => socketRef.current?.kick());
@@ -306,6 +348,7 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
   const unpair = useCallback(async () => {
     // Best effort: revoke on the PC so a copied token is useless; offline PCs keep it until re-pair.
     await client.revokeSelf().catch(() => undefined);
+    HermesBackground.stop();
     await clearPairingToken();
     socketRef.current?.stop();
     mirrorRef.current = emptyMirror;
@@ -317,14 +360,19 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
   const newChat = useCallback(async (project?: string) => (await client.newChat(project)).chatId, [client]);
 
   const deliver = useCallback(
-    async (target: SendTarget, text: string, id: string) => {
+    async (target: SendTarget, text: string, id: string, files: Attachment[] = []) => {
       try {
-        if (target.sessionId) await client.sendToSession(target.sessionId, text, id);
-        else if (target.chatId) await client.send(target.chatId, text, id);
+        if (target.sessionId) await client.sendToSession(target.sessionId, text, id, files);
+        else if (target.chatId) await client.send(target.chatId, text, id, files);
         else throw new Error('Nothing to send to');
         update((s) => markOutbox(s, id, 'sent'));
       } catch (err) {
-        update((s) => markOutbox(s, id, 'failed', describeError(err, pairing.pcName)));
+        const why = describeError(err, pairing.pcName);
+        // With files the transport can fail before any network I/O (unreadable uri, bad part):
+        // show the raw reason instead of a misleading "can't reach the PC".
+        const raw = files.length && isBridgeError(err) && err.code === 'UNREACHABLE' ? ` (${err.message})` : '';
+        if (raw) console.warn('[hermes] upload failed', (err as Error).message, files.map((f) => f.uri));
+        update((s) => markOutbox(s, id, 'failed', files.length && raw ? `Upload failed${raw}` : why));
         if (isBridgeError(err) && err.unauthorized) fail(err);
       }
     },
@@ -332,14 +380,14 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
   );
 
   const send = useCallback(
-    async (target: SendTarget, text: string) => {
+    async (target: SendTarget, text: string, attachments: Attachment[] = []) => {
       const t = text.trim();
-      if (!t) return;
+      if (!t && !attachments.length) return;
       const id = newClientMessageId();
       const sessionId = target.sessionId ?? null;
       const chatId = sessionId ? null : (target.chatId ?? null);
-      update((s) => enqueue(s, { clientMessageId: id, chatId, sessionId, text: t }));
-      await deliver({ sessionId, chatId }, t, id);
+      update((s) => enqueue(s, { clientMessageId: id, chatId, sessionId, text: t, attachments }));
+      await deliver({ sessionId, chatId }, t, id, attachments);
     },
     [update, deliver],
   );
@@ -348,9 +396,17 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     async (id: string) => {
       const item = mirrorRef.current.outbox.find((o) => o.clientMessageId === id);
       if (!item) return;
-      update((s) => enqueue(s, { clientMessageId: id, chatId: item.chatId, sessionId: item.sessionId, text: item.text }));
+      update((s) =>
+        enqueue(s, {
+          clientMessageId: id,
+          chatId: item.chatId,
+          sessionId: item.sessionId,
+          text: item.text,
+          attachments: item.attachments,
+        }),
+      );
       // same id → Gateway drops it if the first try landed
-      await deliver({ sessionId: item.sessionId, chatId: item.chatId }, item.text, id);
+      await deliver({ sessionId: item.sessionId, chatId: item.chatId }, item.text, id, item.attachments ?? []);
     },
     [update, deliver],
   );
@@ -414,6 +470,9 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     discard,
     resolveChat,
     reresolve,
+    backgroundNotify,
+    backgroundAvailable: HermesBackground.available,
+    setBackgroundNotify,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

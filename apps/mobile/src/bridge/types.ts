@@ -49,6 +49,14 @@ export interface Session {
   project?: ProjectRef | null;
 }
 
+/** A local file picked on the phone (content:// or file:// uri), uploaded with the message. */
+export interface Attachment {
+  uri: string;
+  name: string;
+  mime: string;
+  size?: number | null;
+}
+
 export interface ProjectRef {
   slug: string;
   name: string;

@@ -1,0 +1,7 @@
+<resources>
+  <string name="hermes_bg_connecting">Connecting to your PC…</string>
+  <string name="hermes_bg_connected">Connected to %1$s — you\'ll be notified when Hermes replies</string>
+  <string name="hermes_bg_waiting">Waiting for %1$s…</string>
+  <string name="hermes_bg_channel_status">Connection status</string>
+  <string name="hermes_bg_channel_replies">Hermes replies</string>
+</resources>

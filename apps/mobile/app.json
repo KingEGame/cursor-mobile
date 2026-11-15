@@ -1,8 +1,8 @@
 {
   "expo": {
     "name": "Hermes Phone",
-    "slug": "cursor-mobile",
-    "version": "0.3.1",
+    "slug": "hermes-phone",
+    "version": "0.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -14,10 +14,10 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "local.cursor.mobile"
+      "bundleIdentifier": "local.hermes.phone"
     },
     "android": {
-      "package": "local.cursor.mobile",
+      "package": "local.hermes.phone",
       "adaptiveIcon": {
         "backgroundColor": "#0f1419",
         "foregroundImage": "./assets/android-icon-foreground.png",

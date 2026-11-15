@@ -389,3 +389,25 @@ describe('projects', () => {
     ]);
   });
 });
+
+describe('attachments', () => {
+  it('sends text as JSON and files as multipart with a long timeout', async () => {
+    const seen: { url: string; body: unknown; ct?: string }[] = [];
+    const c = new BridgeClient({
+      baseUrl: 'http://pc:8097',
+      token: 't',
+      fetchImpl: (async (u: unknown, init?: RequestInit) => {
+        seen.push({ url: String(u), body: init?.body, ct: (init?.headers as Record<string, string>)['Content-Type'] });
+        return new Response(JSON.stringify({ accepted: true }), { status: 202 });
+      }) as typeof fetch,
+    });
+    await c.send('p_1', 'hi', 'm1');
+    await c.sendToSession('s1', 'look', 'm2', [{ uri: 'file:///x.png', name: 'x.png', mime: 'image/png' }]);
+    assert.equal(seen[0]!.ct, 'application/json');
+    assert.ok(seen[1]!.body instanceof FormData, 'multipart for files');
+    assert.equal(seen[1]!.ct, undefined, 'fetch sets the multipart boundary itself');
+    assert.equal((seen[1]!.body as FormData).get('text'), 'look');
+    assert.equal((seen[1]!.body as FormData).get('clientMessageId'), 'm2');
+    assert.equal(seen[1]!.url, 'http://pc:8097/v1/sessions/s1/messages');
+  });
+});

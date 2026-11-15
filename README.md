@@ -39,6 +39,16 @@ flowchart LR
   sessions from every client, and **New chat in <project>** starts the agent with that project's folder
   (a plugin system-prompt section tells it to work there and read its AGENTS.md). Sessions are matched to
   projects by `cwd` / `git_repo_root` (after `realpath`, so `/data` and `/mnt/data` agree).
+- **Photos and files.** Attach photos (system photo picker), a camera shot or any file; they reach the agent
+  like Telegram attachments (images as vision input, other files as cached paths it can read). Up to 10 files,
+  25 MB per message.
+- **Notifications while the app is closed.** An Android foreground service (`modules/hermes-background`, Kotlin)
+  keeps one quiet WebSocket to the bridge and notifies when a chat from the phone gets its answer; tapping opens
+  the chat. It reconnects on network changes, after reboot and app updates, and stops when the phone is
+  unpaired or revoked. Toggle: Settings → Notifications. No Google/Firebase involved.
+- **Project chats work in the project folder.** Besides the prompt section, a `pre_tool_call` hook sets the
+  project folder as the session's working directory on the first tool call (terminal and file tools resolve
+  against it; the agent can still `cd` elsewhere).
 - Gateway slash commands work from the phone (`/new`, `/stop`, `/model`, …).
 
 ## Set up

@@ -9,7 +9,7 @@ import { checkApkDump } from "./verify-apk.mjs";
 import { versionCodeFor } from "./version-code.mjs";
 
 const ok = {
-  badging: "package: name='local.cursor.mobile' versionCode='200' versionName='0.2.0'\nuses-permission: name='android.permission.INTERNET'",
+  badging: "package: name='local.hermes.phone' versionCode='200' versionName='0.2.0'\nuses-permission: name='android.permission.INTERNET'",
   manifestTree: "A: android:usesCleartextTraffic(0x010104ec)=true",
 };
 

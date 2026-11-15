@@ -40,7 +40,7 @@ except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
 from gateway.config import Platform, PlatformConfig
-from gateway.platforms.base import BasePlatformAdapter, SendResult
+from gateway.platforms.base import BasePlatformAdapter, SendResult, cache_media_bytes_async
 from gateway.platforms.event import MessageEvent, MessageType
 from gateway.platforms.helpers import MessageDeduplicator
 from gateway.platforms._shared import get_scoped_secret as _secret
@@ -60,6 +60,8 @@ ADDRESS_CACHE_S = 60
 PAIR_TTL_S = 300
 PAIR_MAX_ATTEMPTS = 5          # per client IP per minute
 REPLAY_LIMIT = 2000
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024   # per request (photos, PDFs, logs from the phone)
+MAX_ATTACHMENTS = 10
 # Sessions that are internal plumbing, hidden from the phone list unless ?all=1.
 HIDDEN_SOURCES = ("subagent", "oneshot", "kanban")
 _TRUTHY = ("1", "true", "yes", "on")
@@ -201,7 +203,8 @@ class StateReader:
 
     def session_row(self, session_id: str) -> Optional[dict[str, Any]]:
         with self._conn() as c:
-            r = c.execute("SELECT id, source, chat_id, ended_at FROM sessions WHERE id=?", (session_id,)).fetchone()
+            r = c.execute("SELECT id, source, chat_id, ended_at, COALESCE(title, display_name) AS title "
+                          "FROM sessions WHERE id=?", (session_id,)).fetchone()
         return dict(r) if r else None
 
     def list_sessions(self, limit: int, before: Optional[float], source: Optional[str],
@@ -337,7 +340,7 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
             return False
         try:
             self._cursor = await asyncio.to_thread(self._state.max_message_id)
-            app = web.Application(middlewares=[self._auth_middleware], client_max_size=2 * 1024 * 1024)
+            app = web.Application(middlewares=[self._auth_middleware], client_max_size=MAX_UPLOAD_BYTES + 1024 * 1024)
             r = app.router
             r.add_get("/v1/health", self._h_health)
             r.add_post("/v1/pair/start", self._h_pair_start)
@@ -465,8 +468,12 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
                 continue
             self._last_status[sid] = status
             tail = await asyncio.to_thread(self._state.tail, sid, 1) if status == "idle" else []
+            row = await asyncio.to_thread(self._state.session_row, sid)
+            # source/title let the phone's background service decide what deserves a notification.
             await self._broadcast({"type": "session.updated", "sessionId": sid, "status": status,
-                                   "lastMessage": tail[-1] if tail else None, "at": _iso(time.time())},
+                                   "lastMessage": tail[-1] if tail else None, "at": _iso(time.time()),
+                                   "source": row["source"] if row else None,
+                                   "title": (row["title"] if row else None) or None},
                                   session_id=sid)
         self._last_status = {s: v for s, v in self._last_status.items() if v == "working" or s in changed}
 
@@ -844,16 +851,65 @@ load(); setInterval(load, 1500);
         except Exception as e:
             logger.debug("[phone] project pre-resolve failed: %s", e)
 
+    async def _read_message(self, request: "web.Request") -> tuple[str, str, list[Any]] | "web.Response":
+        """JSON ``{text, clientMessageId}`` or multipart (``text``, ``clientMessageId``, ``file`` parts).
+        Files are cached exactly like Telegram/Teams attachments (``cache_media_bytes``)."""
+        files: list[tuple[bytes, str, str]] = []
+        if request.content_type.startswith("multipart/"):
+            fields: dict[str, str] = {}
+            total = 0
+            reader = await request.multipart()
+            async for part in reader:
+                if part.filename is not None:
+                    if len(files) >= MAX_ATTACHMENTS:
+                        return self._err(400, "VALIDATION_ERROR", f"at most {MAX_ATTACHMENTS} files")
+                    data = await part.read(decode=False)
+                    total += len(data)
+                    if total > MAX_UPLOAD_BYTES:
+                        return self._err(413, "TOO_LARGE", "attachments exceed 25 MB")
+                    files.append((bytes(data), part.filename or "file",
+                                  part.headers.get("Content-Type", "application/octet-stream")))
+                else:
+                    fields[part.name or ""] = (await part.text())[:100_000]
+            text, cmid = fields.get("text", "").strip(), fields.get("clientMessageId", "")
+        else:
+            try:
+                body = await request.json()
+            except ValueError:
+                return self._err(400, "VALIDATION_ERROR", "invalid JSON")
+            text, cmid = str(body.get("text", "")).strip(), str(body.get("clientMessageId") or "")
+        if not text and not files:
+            return self._err(400, "VALIDATION_ERROR", "text or a file is required")
+        media = []
+        for data, name, mime in files:
+            try:
+                cached = await cache_media_bytes_async(data, filename=name, mime_type=mime)
+            except ValueError as e:
+                return self._err(400, "BAD_ATTACHMENT", f"{name}: {e}")
+            if cached is None:
+                return self._err(400, "BAD_ATTACHMENT", f"{name} is not a valid image")
+            media.append(cached)
+        return text, cmid or uuid.uuid4().hex, media
+
+    @staticmethod
+    def _event(source: Any, text: str, msg_id: str, media: list[Any], raw: dict[str, Any]) -> MessageEvent:
+        kinds = [m.kind for m in media]
+        mtype = (MessageType.COMMAND if text.startswith("/") and not media else
+                 MessageType.PHOTO if "image" in kinds else MessageType.VIDEO if "video" in kinds else
+                 MessageType.AUDIO if "audio" in kinds else MessageType.DOCUMENT if kinds else MessageType.TEXT)
+        # Non-image files reach the agent as paths (it reads them with its tools), like other platforms.
+        notes = [m.context_note() for m in media if m.kind != "image"]
+        full = "\n".join([t for t in [text, *notes] if t])
+        return MessageEvent(text=full, message_type=mtype, source=source, message_id=msg_id,
+                            media_urls=[m.path for m in media], media_types=[m.media_type for m in media],
+                            raw_message=raw)
+
     async def _h_send(self, request: "web.Request") -> "web.Response":
         chat_id = request.match_info["chat_id"]
-        try:
-            body = await request.json()
-        except ValueError:
-            return self._err(400, "VALIDATION_ERROR", "invalid JSON")
-        text = str(body.get("text", "")).strip()
-        if not text:
-            return self._err(400, "VALIDATION_ERROR", "text is required")
-        msg_id = str(body.get("clientMessageId") or uuid.uuid4().hex)
+        parsed = await self._read_message(request)
+        if isinstance(parsed, web.Response):
+            return parsed
+        text, msg_id, media = parsed
         if self._dedup.is_duplicate(msg_id):
             return web.json_response({"accepted": True, "duplicate": True, "chatId": chat_id, "messageId": msg_id})
         device_id = request["device_id"]
@@ -863,9 +919,7 @@ load(); setInterval(load, 1500);
         slug = self._chat_projects.chat(chat_id)
         if slug:
             await self._remember_project_session(source, slug)
-        mtype = MessageType.COMMAND if text.startswith("/") else MessageType.TEXT
-        event = MessageEvent(text=text, message_type=mtype, source=source, message_id=msg_id,
-                             raw_message={"device": device_id})
+        event = self._event(source, text, msg_id, media, {"device": device_id})
         asyncio.create_task(self.handle_message(event), name=f"phone-inbound-{msg_id[:8]}")
         self._wake.set()
         return web.json_response({"accepted": True, "chatId": chat_id, "messageId": msg_id}, status=202)
@@ -918,19 +972,15 @@ load(); setInterval(load, 1500);
 
     async def _h_send_to_session(self, request: "web.Request") -> "web.Response":
         sid = request.match_info["sid"]
-        try:
-            body = await request.json()
-        except ValueError:
-            return self._err(400, "VALIDATION_ERROR", "invalid JSON")
-        text = str(body.get("text", "")).strip()
-        if not text:
-            return self._err(400, "VALIDATION_ERROR", "text is required")
         row = await asyncio.to_thread(self._state.session_row, sid)
         if not row:
             return self._err(404, "SESSION_NOT_FOUND", "no such session")
         if row["source"] in HIDDEN_SOURCES:
             return self._err(403, "SESSION_READ_ONLY", "internal sessions cannot be continued")
-        msg_id = str(body.get("clientMessageId") or uuid.uuid4().hex)
+        parsed = await self._read_message(request)
+        if isinstance(parsed, web.Response):
+            return parsed
+        text, msg_id, media = parsed
         if self._dedup.is_duplicate(msg_id):
             return web.json_response({"accepted": True, "duplicate": True, "sessionId": sid, "messageId": msg_id})
         holder = await asyncio.to_thread(self._state.lease_holder, sid)
@@ -946,9 +996,7 @@ load(); setInterval(load, 1500);
         err = await self._bind_route(source, sid)
         if err:
             return self._err(503, "BIND_FAILED", f"could not attach to the session: {err}")
-        mtype = MessageType.COMMAND if text.startswith("/") else MessageType.TEXT
-        event = MessageEvent(text=text, message_type=mtype, source=source, message_id=msg_id,
-                             raw_message={"device": device_id, "session": sid})
+        event = self._event(source, text, msg_id, media, {"device": device_id, "session": sid})
         asyncio.create_task(self.handle_message(event), name=f"phone-inbound-{msg_id[:8]}")
         self._wake.set()
         return web.json_response({"accepted": True, "sessionId": sid, "chatId": chat_id, "messageId": msg_id},
@@ -1003,17 +1051,14 @@ def _is_home_channel_nag(content: Optional[str]) -> bool:
     return t.startswith("\U0001F4EC") and "/sethome" in t
 
 
-def _project_prompt_section(info: Any) -> str:
-    """Frozen into each NEW phone session's system prompt: which project the chat was started in.
+def _project_for_session(sid: str) -> Optional[dict[str, Any]]:
+    """Project a phone session was started in, read from the files the adapter writes.
 
     Must not rely on module globals: Hermes may import this plugin several times (per-profile module names,
-    hot reload evicts and re-executes it), so the instance holding the live adapter is not necessarily the
-    one whose callback got registered. Everything is read from the files the adapter writes."""
-    if str(info.get("platform") or "") != "phone":
-        return ""
-    sid = str(info.get("session_id") or "")
+    hot reload evicts and re-executes it), so the module instance that registered a callback is not
+    necessarily the one holding the live adapter."""
     if not sid:
-        return ""
+        return None
     home = _hermes_home()
     store = ChatProjects(Path(os.environ.get("PHONE_BRIDGE_PROJECTS_PATH") or home / "phone_bridge" / "projects.json"))
     slug = store.session(sid)
@@ -1022,9 +1067,42 @@ def _project_prompt_section(info: Any) -> str:
             row = StateReader(Path(os.environ.get("PHONE_BRIDGE_DB_PATH") or home / "state.db")).session_row(sid)
         except Exception:
             row = None
-        slug = store.chat(row["chat_id"]) if row else None
-    p = ProjectIndex().get(slug) if slug else None
+        slug = store.chat(row["chat_id"]) if row and row.get("source") == "phone" else None
+    return ProjectIndex().get(slug) if slug else None
+
+
+def _project_prompt_section(info: Any) -> str:
+    """Frozen into each NEW phone session's system prompt: which project the chat was started in."""
+    if str(info.get("platform") or "") != "phone":
+        return ""
+    p = _project_for_session(str(info.get("session_id") or ""))
     return prompt_section(p) if p else ""
+
+
+_PINNED: set[str] = set()
+
+
+def _pin_project_cwd(tool_name: str = "", args: Any = None, task_id: Optional[str] = None,
+                     session_id: Optional[str] = None, **_: Any) -> None:
+    """``pre_tool_call``: on a project session's first tool call, make the project folder the session's
+    working directory (terminal + file tools resolve relative paths against it) — the same record a ``cd``
+    writes, so the agent can still move elsewhere. Never blocks or modifies the call."""
+    if not session_id or session_id in _PINNED:
+        return None
+    _PINNED.add(session_id)
+    try:
+        p = _project_for_session(session_id)
+        path = p and p.get("path")
+        if not path or not os.path.isdir(path):
+            return None
+        from tools.terminal_tool import get_session_cwd, record_session_cwd
+        key = task_id or session_id
+        if not get_session_cwd(key):
+            record_session_cwd(key, path)
+            logger.info("[phone] session %s works in project %s (%s)", session_id, p["slug"], path)
+    except Exception as e:  # internal API moved? the prompt section still names the folder
+        logger.debug("[phone] project cwd pin skipped: %s", e)
+    return None
 
 
 def check_requirements() -> bool:
@@ -1064,3 +1142,7 @@ def register(ctx) -> None:
         ctx.register_system_prompt_section("phone-bridge.project", _project_prompt_section, max_chars=2000)
     except Exception as e:  # older Hermes without prompt sections: projects still list, just no context
         logger.info("[phone] project prompt section unavailable: %s", e)
+    try:
+        ctx.register_hook("pre_tool_call", _pin_project_cwd)
+    except Exception as e:
+        logger.info("[phone] project cwd hook unavailable: %s", e)

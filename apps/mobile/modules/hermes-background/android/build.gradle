@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'local.hermes'
+version = '0.4.0'
+
+android {
+  namespace "expo.modules.hermesbackground"
+  defaultConfig {
+    versionCode 1
+    versionName '0.4.0'
+    consumerProguardFiles 'proguard-rules.pro'
+  }
+}
+
+dependencies {
+  // Same OkHttp React Native already ships (one copy in the APK).
+  implementation 'com.squareup.okhttp3:okhttp:4.9.2'
+  implementation 'androidx.core:core:1.13.1'
+}

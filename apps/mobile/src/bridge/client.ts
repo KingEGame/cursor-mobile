@@ -2,6 +2,7 @@
  * REST client for the Hermes Gateway phone bridge. Pure (fetch is injectable) — unit-tested in Node.
  */
 import type {
+  Attachment,
   Health,
   Project,
   ProjectRef,
@@ -60,30 +61,41 @@ export class BridgeClient {
   private readonly token: string | null;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  /** Uploads go through XMLHttpRequest in the app (see post()); tests keep using the injected fetch. */
+  private readonly useXhr: boolean;
 
   constructor(opts: BridgeClientOptions) {
     this.baseUrl = normalizeBaseUrl(opts.baseUrl);
     this.token = opts.token ?? null;
     this.fetchImpl = opts.fetchImpl ?? ((...a) => fetch(...a));
     this.timeoutMs = opts.timeoutMs ?? 12_000;
+    this.useXhr = !opts.fetchImpl && typeof XMLHttpRequest !== 'undefined';
   }
 
-  private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown, auth = true): Promise<T> {
+  private async request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    body?: unknown,
+    auth = true,
+    timeoutMs = this.timeoutMs,
+  ): Promise<T> {
     if (!this.baseUrl) throw new BridgeError(0, 'NO_ADDRESS', 'PC address is not set');
     const headers: Record<string, string> = { Accept: 'application/json' };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+    // multipart: fetch sets the boundary itself
+    if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json';
     if (auth) {
       if (!this.token) throw new BridgeError(401, 'NOT_PAIRED', 'This phone is not paired');
       headers.Authorization = `Bearer ${this.token}`;
     }
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     let res: Response;
     try {
       res = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : isForm ? (body as FormData) : JSON.stringify(body),
         signal: ctrl.signal,
       });
     } catch (err) {
@@ -91,7 +103,7 @@ export class BridgeClient {
       throw new BridgeError(
         0,
         aborted ? 'TIMEOUT' : 'UNREACHABLE',
-        aborted ? `No answer from the PC in ${Math.round(this.timeoutMs / 1000)}s` : String(err),
+        aborted ? `No answer from the PC in ${Math.round(timeoutMs / 1000)}s` : String(err),
       );
     } finally {
       clearTimeout(timer);
@@ -177,16 +189,58 @@ export class BridgeClient {
   }
 
   /** `clientMessageId` makes retries idempotent (the Gateway drops duplicates for 10 min). */
-  send(chatId: string, text: string, clientMessageId: string): Promise<SendResponse> {
-    return this.request('POST', `/v1/chats/${encodeURIComponent(chatId)}/messages`, { text, clientMessageId });
+  send(chatId: string, text: string, clientMessageId: string, files: Attachment[] = []): Promise<SendResponse> {
+    return this.post(`/v1/chats/${encodeURIComponent(chatId)}/messages`, text, clientMessageId, files);
   }
 
   /**
    * Continue ANY session (PC terminal, desktop app, Telegram, …). The Gateway attaches a phone route
    * to it like `/resume` and runs the turn there; 409 SESSION_BUSY while another client is mid-turn.
    */
-  sendToSession(sessionId: string, text: string, clientMessageId: string): Promise<SendResponse> {
-    return this.request('POST', `/v1/sessions/${encodeURIComponent(sessionId)}/messages`, { text, clientMessageId });
+  sendToSession(sessionId: string, text: string, clientMessageId: string, files: Attachment[] = []): Promise<SendResponse> {
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/messages`, text, clientMessageId, files);
+  }
+
+  /** JSON for text, multipart when files are attached (`{uri,name,type}` parts streamed from disk). */
+  private post(path: string, text: string, clientMessageId: string, files: Attachment[]): Promise<SendResponse> {
+    if (!files.length) return this.request('POST', path, { text, clientMessageId });
+    const form = new FormData();
+    form.append('text', text);
+    form.append('clientMessageId', clientMessageId);
+    for (const f of files) form.append('file', { uri: f.uri, name: f.name, type: f.mime } as unknown as Blob);
+    const timeout = Math.max(this.timeoutMs, 120_000);
+    // Expo replaces global fetch with expo/fetch, which rejects `uri` FormData parts ("Unsupported
+    // FormDataPart implementation") before any network I/O. React Native's XMLHttpRequest still goes
+    // through RN networking, which reads file:// / content:// parts itself. Tests inject fetchImpl.
+    if (this.useXhr) return this.xhrForm<SendResponse>(path, form, timeout);
+    return this.request('POST', path, form, true, timeout);
+  }
+
+  private xhrForm<T>(path: string, form: FormData, timeoutMs: number): Promise<T> {
+    if (!this.baseUrl) return Promise.reject(new BridgeError(0, 'NO_ADDRESS', 'PC address is not set'));
+    if (!this.token) return Promise.reject(new BridgeError(401, 'NOT_PAIRED', 'This phone is not paired'));
+    return new Promise<T>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${this.baseUrl}${path}`);
+      xhr.setRequestHeader('Accept', 'application/json');
+      xhr.setRequestHeader('Authorization', `Bearer ${this.token}`);
+      xhr.timeout = timeoutMs;
+      xhr.onload = () => {
+        let json: unknown = null;
+        try {
+          json = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+        } catch {
+          json = null;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) return resolve(json as T);
+        const e = (json as { error?: { code?: string; message?: string } } | null)?.error;
+        reject(new BridgeError(xhr.status, e?.code ?? `HTTP_${xhr.status}`, e?.message ?? xhr.responseText.slice(0, 200)));
+      };
+      xhr.onerror = () => reject(new BridgeError(0, 'UNREACHABLE', 'Upload failed: network error'));
+      xhr.ontimeout = () =>
+        reject(new BridgeError(0, 'TIMEOUT', `No answer from the PC in ${Math.round(timeoutMs / 1000)}s`));
+      xhr.send(form);
+    });
   }
 
   /** Which Hermes session a phone chat turned into (null until the agent picked it up). */

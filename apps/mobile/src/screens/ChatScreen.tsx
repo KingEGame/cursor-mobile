@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -11,7 +12,9 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowUp, RotateCw, Wrench, X } from 'lucide-react-native';
+import { ArrowUp, Camera, FileText, ImageIcon, Paperclip, RotateCw, Wrench, X } from 'lucide-react-native';
+import { humanSize, MAX_ATTACHMENT_BYTES, pickFiles, pickPhotos, takePhoto, totalBytes } from '../bridge/attachments';
+import type { Attachment } from '../bridge/types';
 import { Markdown } from '../components/Markdown';
 import { useBridge } from '../bridge/BridgeProvider';
 import { buildTranscript, resumeCommand, sessionTitle, sourceLabel, toolsLabel, type ChatItem } from '../bridge/format';
@@ -32,6 +35,25 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
     route.params.sessionId ?? (route.params.chatId ? findSessionByChat(mirror, route.params.chatId)?.id : undefined),
   );
   const [draft, setDraft] = useState('');
+  const [files, setFiles] = useState<Attachment[]>([]);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+
+  const addFrom = async (pick: () => Promise<Attachment[]>) => {
+    setAttachOpen(false);
+    setAttachError(null);
+    try {
+      const got = await pick();
+      const next = [...files, ...got].slice(0, 10);
+      if (totalBytes(next) > MAX_ATTACHMENT_BYTES) {
+        setAttachError('Files are over 25 MB together — send fewer at a time.');
+        return;
+      }
+      setFiles(next);
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : String(err));
+    }
+  };
   const [resolving, setResolving] = useState(false);
 
   const session = sessionId ? mirror.sessions.find((s) => s.id === sessionId) : undefined;
@@ -85,9 +107,11 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
 
   const onSend = async () => {
     const text = draft.trim();
-    if (!text || (!sessionId && !chatId)) return;
+    if ((!text && !files.length) || (!sessionId && !chatId)) return;
+    const toSend = files;
     setDraft('');
-    await bridge.send(sessionId ? { sessionId } : { chatId }, text);
+    setFiles([]);
+    await bridge.send(sessionId ? { sessionId } : { chatId }, text, toSend);
     if (!sessionId && chatId && !resolving) {
       setResolving(true);
       const s = await bridge.resolveChat(chatId);
@@ -143,8 +167,54 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
             Continuing a {sourceLabel(session.source)} session · also on PC: {resumeCommand(session.id)}
           </Text>
         ) : null}
+        {canSend && (files.length || attachError) ? (
+          <View style={styles.attachBar}>
+            {files.map((f, i) => (
+              <View key={`${f.uri}${i}`} style={styles.attachChip}>
+                {f.mime.startsWith('image/') ? (
+                  <Image source={{ uri: f.uri }} style={styles.thumb} />
+                ) : (
+                  <FileText size={16} color={colors.muted} />
+                )}
+                <Text style={styles.attachName} numberOfLines={1}>
+                  {f.name}
+                  {f.size ? ` · ${humanSize(f.size)}` : ''}
+                </Text>
+                <Pressable onPress={() => setFiles(files.filter((_, j) => j !== i))} hitSlop={8} accessibilityLabel="Remove">
+                  <X size={14} color={colors.muted} />
+                </Pressable>
+              </View>
+            ))}
+            {attachError ? <Text style={styles.failText}>{attachError}</Text> : null}
+          </View>
+        ) : null}
+        {canSend && attachOpen ? (
+          <View style={styles.attachMenu}>
+            <Pressable style={styles.attachOpt} onPress={() => void addFrom(pickPhotos)} testID="attach-photos">
+              <ImageIcon size={20} color={colors.text} />
+              <Text style={styles.attachOptText}>Photos</Text>
+            </Pressable>
+            <Pressable style={styles.attachOpt} onPress={() => void addFrom(takePhoto)} testID="attach-camera">
+              <Camera size={20} color={colors.text} />
+              <Text style={styles.attachOptText}>Camera</Text>
+            </Pressable>
+            <Pressable style={styles.attachOpt} onPress={() => void addFrom(pickFiles)} testID="attach-files">
+              <FileText size={20} color={colors.text} />
+              <Text style={styles.attachOptText}>File</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {canSend ? (
           <View style={styles.composer}>
+            <Pressable
+              style={styles.clip}
+              onPress={() => setAttachOpen((v) => !v)}
+              testID="chat-attach"
+              accessibilityLabel="Attach"
+              hitSlop={6}
+            >
+              <Paperclip size={20} color={attachOpen ? colors.accent : colors.muted} />
+            </Pressable>
             <TextInput
               style={styles.input}
               value={draft}
@@ -155,8 +225,8 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
               testID="chat-input"
             />
             <Pressable
-              style={[styles.send, !draft.trim() && { opacity: 0.4 }]}
-              disabled={!draft.trim()}
+              style={[styles.send, !draft.trim() && !files.length && { opacity: 0.4 }]}
+              disabled={!draft.trim() && !files.length}
               onPress={() => void onSend()}
               testID="chat-send"
               accessibilityLabel="Send"
@@ -228,7 +298,12 @@ function RowView({
     return (
       <View style={styles.userWrap}>
         <View style={[styles.userBubble, item.state === 'failed' && styles.failedBubble]}>
-          <Text style={styles.userText}>{item.text}</Text>
+          {item.text ? <Text style={styles.userText}>{item.text}</Text> : null}
+          {item.attachments?.length ? (
+            <Text style={styles.attachLine}>
+              📎 {item.attachments.map((a) => a.name).join(', ')}
+            </Text>
+          ) : null}
         </View>
         {item.state === 'failed' ? (
           <View style={styles.failRow}>
@@ -314,6 +389,39 @@ const styles = StyleSheet.create({
   toolsText: { fontSize: 12, color: colors.muted },
   workingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs },
   workingText: { fontSize: type.meta, color: colors.accent, fontWeight: weight.semibold },
+  attachBar: { paddingHorizontal: spacing.sm, paddingTop: spacing.xs, gap: 6 },
+  attachChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.surface,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 4,
+  },
+  thumb: { width: 32, height: 32, borderRadius: 6 },
+  attachName: { flex: 1, fontSize: type.meta, color: colors.text },
+  attachMenu: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.xs,
+  },
+  attachOpt: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  attachOptText: { fontSize: type.meta, color: colors.text },
+  attachLine: { fontSize: type.meta, color: colors.muted, marginTop: 2 },
+  clip: { justifyContent: 'center', paddingHorizontal: 4 },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
