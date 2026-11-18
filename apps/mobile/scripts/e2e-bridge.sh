@@ -22,4 +22,7 @@ SRV=$!
 trap 'kill $SRV 2>/dev/null' EXIT
 for _ in $(seq 1 60); do grep -q '^PAIR' "$LOG" && break; sleep 0.5; done
 read -r _ PAIR_ID CODE < <(grep '^PAIR' "$LOG") || { echo "server did not start:"; cat "$LOG"; exit 2; }
-cd "$(dirname "$0")/.." && node --import tsx scripts/e2e-bridge.ts "http://127.0.0.1:$PORT" "$PAIR_ID" "$CODE"
+# T16: the bridge listens on TLS with a self-signed cert; e2e is loopback-only, so skip
+# certificate verification for the node client (fetch + WebSocket both honor this).
+export NODE_TLS_REJECT_UNAUTHORIZED=0
+cd "$(dirname "$0")/.." && node --import tsx scripts/e2e-bridge.ts "https://127.0.0.1:$PORT" "$PAIR_ID" "$CODE"
