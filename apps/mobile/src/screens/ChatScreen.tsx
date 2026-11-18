@@ -151,7 +151,9 @@ export function ChatScreen({ navigation, route }: ScreenProps<'Chat'>) {
             ListHeaderComponent={working ? <WorkingRow /> : null}
             ListEmptyComponent={
               !sessionId ? (
-                <View style={[styles.center, { transform: [{ scaleY: -1 }] }]}>
+                // RN 0.86+ inverted lists bottom-anchor without mirroring pixels,
+                // so the old scaleY(-1) un-flip would render this text upside down.
+                <View style={styles.center}>
                   <Text style={styles.emptyTitle}>Ask Hermes anything</Text>
                   <Text style={styles.emptyText}>
                     This chat is stored on the PC. Commands like /new, /stop, /model work here too.
