@@ -9,7 +9,7 @@
 |------|---------|
 | **state.db is the truth** | The bridge reads `~/.hermes/state.db` read-only and writes only through normal gateway inbound events. No second history, no copies on the phone beyond a cache. |
 | **No gateway core changes** | Server lives in the plugin `~/.hermes/plugins/phone_bridge`. Gateway internals are touched only through `adapter.gateway_runner` (session routing like `/resume`) and fail soft if they change. |
-| **PC-local + Tailscale** | Phone ↔ PC over Tailscale HTTP (cleartext allowed in the manifest; WireGuard encrypts). Pairing codes are created only on the PC (`/pair`, localhost-only). |
+| **PC-local + Tailscale** | Phone ↔ PC over TLS (self-signed cert, T16: bridge is HTTPS-only on all paths, cleartext blocked in the manifest). Pairing codes are created only on the PC (`/pair`, localhost-only). |
 | **Evidence over claims** | `npm test`, `npm run e2e`, `smoke_test.py`, `bind_test.py` must be green before saying it works. |
 
 ## Map
