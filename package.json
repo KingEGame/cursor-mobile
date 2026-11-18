@@ -7,10 +7,10 @@
     "apps/*"
   ],
   "scripts": {
-    "test": "npm run test -w @cursor-mobile/mobile",
-    "typecheck": "npm run typecheck -w @cursor-mobile/mobile",
+    "test": "npm run test -w @hermes-phone/mobile",
+    "typecheck": "npm run typecheck -w @hermes-phone/mobile",
     "e2e": "bash apps/mobile/scripts/e2e-bridge.sh",
-    "start:mobile": "npm run start -w @cursor-mobile/mobile",
+    "start:mobile": "npm run start -w @hermes-phone/mobile",
     "gate": "bash scripts/release-gate.sh",
     "release:apk": "bash scripts/release-apk-local.sh",
     "hooks:install": "git config core.hooksPath .githooks",

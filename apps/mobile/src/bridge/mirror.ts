@@ -2,7 +2,16 @@
  * Pure, testable mirror of the PC's state.db as seen by the phone.
  * Every mutation goes through these functions; React only holds the resulting object.
  */
-import type { Attachment, Message, Session, SessionStatus, WsLiveUpdate, WsServerEvent } from './types';
+import type {
+  Attachment,
+  Message,
+  PresenceData,
+  Session,
+  SessionStatus,
+  WsLiveUpdate,
+  WsPresenceUpdated,
+  WsServerEvent,
+} from './types';
 
 export type OutboxState = 'sending' | 'sent' | 'failed';
 
@@ -46,6 +55,8 @@ export interface MirrorState {
   live: LiveItem[];
   /** A message arrived for a session we do not list yet → caller should refetch the list. */
   needsSessionRefresh: boolean;
+  /** Latest Mate presence state from the PC mirror (presence.json). */
+  presence: PresenceData | null;
 }
 
 export const emptyMirror: MirrorState = {
@@ -56,6 +67,7 @@ export const emptyMirror: MirrorState = {
   outbox: [],
   live: [],
   needsSessionRefresh: false,
+  presence: null,
 };
 
 /** The stream consumer appends a typing cursor (" ▉") to previews. */
@@ -251,6 +263,18 @@ export function applyEvent(st: MirrorState, ev: WsServerEvent): MirrorState {
       if (!next.sessions.some((s) => s.id === ev.sessionId)) next = { ...next, needsSessionRefresh: true };
       return next;
     }
+    case 'presence.updated':
+      return {
+        ...st,
+        presence: {
+          state: ev.state,
+          current_block: ev.current_block,
+          last_kick: ev.last_kick,
+          last_brief: ev.last_brief,
+          avatar: ev.avatar,
+          updated_at: ev.updated_at,
+        },
+      };
     default:
       return st;
   }

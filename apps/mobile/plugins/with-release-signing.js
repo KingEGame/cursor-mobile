@@ -9,7 +9,7 @@
  */
 const { withAppBuildGradle } = require('expo/config-plugins');
 
-const MARKER = '// cursor-mobile: release signing';
+const MARKER = '// hermes-phone: release signing';
 
 function applyReleaseSigning(gradle) {
   if (gradle.includes(MARKER)) return gradle;

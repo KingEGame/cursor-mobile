@@ -1,17 +1,16 @@
 /**
- * Expo config plugin — allow plain HTTP to the PC Hub in release builds.
+ * Expo config plugin — disable cleartext HTTP in release builds (TLS-only).
  *
- * The Hub speaks HTTP on the Tailscale mesh (WireGuard already encrypts it).
- * Expo does not map `android.usesCleartextTraffic` from app config to the
- * manifest, so without this plugin `expo prebuild` produces a release APK that
- * cannot reach the Hub ("CLEARTEXT communication … not permitted").
+ * T16: the bridge now serves HTTPS with a self-signed certificate on all paths
+ * (Tailscale and LAN). Cleartext traffic is no longer permitted.
+ * The manifest flag comes from this plugin.
  */
 const { withAndroidManifest, AndroidConfig } = require('expo/config-plugins');
 
 const withCleartextHub = (config) =>
   withAndroidManifest(config, (cfg) => {
     const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
-    app.$['android:usesCleartextTraffic'] = 'true';
+    app.$['android:usesCleartextTraffic'] = 'false';
     return cfg;
   });
 

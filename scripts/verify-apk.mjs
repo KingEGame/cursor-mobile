@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
  * Refuse to ship an APK that would break the phone. Checks the BUILT file
- * (aapt2), not the config: a release once shipped without cleartext and could
- * no longer reach the PC over Tailscale HTTP.
+ * (aapt2), not the config: a release once shipped with wrong flag.
  *
  *   node scripts/verify-apk.mjs <apk> [--version-code N]
  *
@@ -31,10 +30,9 @@ export function checkApkDump({ badging, manifestTree }, expectedVersionCode) {
   if (/uses-permission: name='android\.permission\.REQUEST_INSTALL_PACKAGES'/.test(badging)) {
     problems.push("REQUEST_INSTALL_PACKAGES is back — the app has no self-updater any more");
   }
-  // xmltree prints either `usesCleartextTraffic(0x010104ec)=(type 0x12)0xffffffff`
-  // (older aapt2) or `usesCleartextTraffic(0x010104ec)=true` (build-tools 36).
-  if (!/usesCleartextTraffic\([^)]*\)=(?:\(type 0x12\)0xffffffff|true)\b/.test(manifestTree)) {
-    problems.push("usesCleartextTraffic is not true — the app could not reach the Hermes bridge over Tailscale HTTP");
+  // T16: usesCleartextTraffic=false — TLS-only, no cleartext.
+  if (!/usesCleartextTraffic\([^)]*\)=(?:\(type 0x12\)0x00000000|false)\b/.test(manifestTree)) {
+    problems.push("usesCleartextTraffic is not false — the TLS-only bridge would be unreachable over plain HTTP");
   }
   return problems;
 }

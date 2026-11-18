@@ -11,8 +11,8 @@ class HermesBackgroundModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("HermesBackground")
 
-    Function("configure") { urls: List<String>, token: String, pcName: String ->
-      BridgePrefs.save(context, urls, token, pcName)
+    Function("configure") { urls: List<String>, token: String, pcName: String, certFingerprint: String ->
+      BridgePrefs.save(context, urls, token, pcName, certFingerprint)
       HermesBridgeService.start(context)
     }
 

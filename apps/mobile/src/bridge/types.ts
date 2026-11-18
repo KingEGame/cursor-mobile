@@ -149,6 +149,9 @@ export interface WsServerHello {
   apiVersion: number;
   cursor: number;
   serverTime: string;
+  /** T16: new token if the old one was rotated. */
+  token?: string;
+  tokenExpiresAt?: string;
 }
 export interface WsStatusSnapshot {
   type: 'status.snapshot';
@@ -170,6 +173,40 @@ export interface WsSessionUpdated {
 export interface WsPong {
   type: 'pong';
   ts: number;
+}
+
+export interface WsPresenceUpdated {
+  type: 'presence.updated';
+  state: string | null;
+  current_block: string | null;
+  last_kick: KickEvent | null;
+  last_brief: BriefEvent | null;
+  avatar: unknown | null;
+  updated_at: string | null;
+}
+
+export interface KickEvent {
+  text: string;
+  ts: string;
+  notification_id?: number;
+}
+
+export interface BriefEvent {
+  text: string;
+  ts: string;
+}
+
+/**
+ * Shape of the presence state in the phone's mirror (always the latest, or null).
+ * The PC's ``presence.json`` is the source of truth.
+ */
+export interface PresenceData {
+  state: string | null;
+  current_block: string | null;
+  last_kick: KickEvent | null;
+  last_brief: BriefEvent | null;
+  avatar: unknown | null;
+  updated_at: string | null;
 }
 export interface WsError {
   type: 'error';
@@ -203,4 +240,5 @@ export type WsServerEvent =
   | WsMessageCreated
   | WsSessionUpdated
   | WsPong
+  | WsPresenceUpdated
   | WsError;

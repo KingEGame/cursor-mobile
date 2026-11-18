@@ -1,6 +1,8 @@
 /**
  * Reconnecting WebSocket to the phone bridge. On every (re)connect it sends `client.hello`
- * with the last message id it has seen, and the Gateway replays whatever was missed.
+ * with the last message id it has seen, the auth token, and the Gateway replays what was missed.
+ *
+ * T16: token is sent in the first frame (client.hello), not in the URL.
  */
 import { wsUrl } from './client';
 import type { WsServerEvent } from './types';
@@ -13,6 +15,8 @@ export interface BridgeSocketOptions {
   /** Last message id applied locally; 0 = nothing yet (no replay requested). */
   getSince: () => number;
   onEvent: (ev: WsServerEvent) => void;
+  /** T16: called when the server rotates the token (returns new token). */
+  onTokenRotated?: (newToken: string) => void;
   onState?: (state: SocketState) => void;
   WebSocketImpl?: typeof WebSocket;
   pingMs?: number;
@@ -20,9 +24,12 @@ export interface BridgeSocketOptions {
   backoffMaxMs?: number;
 }
 
-export function helloFrame(since: number): Record<string, unknown> {
+export function helloFrame(since: number, token?: string): Record<string, unknown> {
   // since=0 would make the Gateway replay the OLDEST messages; history comes from REST instead.
-  return since > 0 ? { type: 'client.hello', sessions: [], since } : { type: 'client.hello', sessions: [] };
+  const frame: Record<string, unknown> = since > 0 ? { type: 'client.hello', sessions: [], since } : { type: 'client.hello', sessions: [] };
+  // T16: token goes in the first frame, not in the URL
+  if (token) frame.token = token;
+  return frame;
 }
 
 export class BridgeSocket {
@@ -65,7 +72,8 @@ export class BridgeSocket {
     const WS = this.opts.WebSocketImpl ?? WebSocket;
     let ws: WebSocket;
     try {
-      ws = new WS(wsUrl(this.opts.baseUrl, this.opts.token));
+      // T16: token not in URL — use wsUrl without token
+      ws = new WS(wsUrl(this.opts.baseUrl));
     } catch {
       this.scheduleRetry();
       return;
@@ -74,7 +82,8 @@ export class BridgeSocket {
     ws.onopen = () => {
       this.attempt = 0;
       this.setState('open');
-      ws.send(JSON.stringify(helloFrame(this.opts.getSince())));
+      // T16: send token in the hello frame
+      ws.send(JSON.stringify(helloFrame(this.opts.getSince(), this.opts.token)));
       this.pingTimer = setInterval(() => {
         if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
       }, this.opts.pingMs ?? 25_000);
@@ -87,6 +96,10 @@ export class BridgeSocket {
         return;
       }
       this.opts.onEvent(data);
+      // T16: token rotation — save new token sent by the server
+      if (data.type === 'server.hello' && data.token && this.opts.onTokenRotated) {
+        this.opts.onTokenRotated(data.token);
+      }
     };
     ws.onerror = () => {
       /* onclose follows and handles the retry */

@@ -61,6 +61,14 @@ export function SettingsScreen({ navigation }: ScreenProps<'Settings'>) {
         </Pressable>
       </View>
 
+      <Text style={styles.section}>Audio recording</Text>
+      <View style={styles.card}>
+        <Pressable style={styles.button} onPress={() => navigation.navigate('Record')}>
+          <Text style={styles.buttonText}>Record a conversation</Text>
+        </Pressable>
+        <Text style={styles.note}>Press and hold to record; file is uploaded to the PC when done.</Text>
+      </View>
+
       <Text style={styles.section}>Notifications</Text>
       <View style={styles.card}>
         <View style={styles.row}>

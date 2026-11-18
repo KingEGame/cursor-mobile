@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { FolderOpen, Plus, Settings } from 'lucide-react-native';
+import { FolderOpen, Plus, Settings, Smartphone } from 'lucide-react-native';
 import { useBridge, type Connection } from '../bridge/BridgeProvider';
 import { oneLine, relativeTime, sessionTitle, sourceLabel } from '../bridge/format';
 import type { Session } from '../bridge/types';
@@ -37,9 +37,14 @@ export function SessionsScreen({ navigation }: ScreenProps<'Sessions'>) {
         </View>
       ),
       headerRight: () => (
-        <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10} testID="open-settings">
-          <Settings size={22} color={colors.text} />
-        </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Pressable onPress={() => navigation.navigate('Mate')} hitSlop={10}>
+            <Smartphone size={20} color={colors.muted} />
+          </Pressable>
+          <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10} testID="open-settings">
+            <Settings size={22} color={colors.text} />
+          </Pressable>
+        </View>
       ),
     });
   }, [navigation, bridge.pairing.pcName, conn.label, conn.color]);

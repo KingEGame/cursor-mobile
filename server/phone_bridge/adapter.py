@@ -24,8 +24,11 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import socket
 import sqlite3
+import ssl
+import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
@@ -62,6 +65,18 @@ PAIR_MAX_ATTEMPTS = 5          # per client IP per minute
 REPLAY_LIMIT = 2000
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024   # per request (photos, PDFs, logs from the phone)
 MAX_ATTACHMENTS = 10
+# T16: token lifecycle
+TOKEN_TTL_DAYS = 90
+# T16: tus uploads
+UPLOADS_DIR = "tmp/uploads"     # relative to mate-data
+CHUNK_SIZE_MIN = 4 * 1024 * 1024
+CHUNK_SIZE_MAX = 8 * 1024 * 1024
+UPLOAD_EXPIRES_HOURS = 24
+# T16: TLS
+TLS_DIR = "tls"                 # relative to phone_bridge home
+# T15: presence mirror
+PRESENCE_FILE = "state/presence.json"  # relative to mate-data
+PRESENCE_DEBOUNCE_S = 2
 # Sessions that are internal plumbing, hidden from the phone list unless ?all=1.
 HIDDEN_SOURCES = ("subagent", "oneshot", "kanban")
 _TRUTHY = ("1", "true", "yes", "on")
@@ -140,16 +155,18 @@ class DeviceStore:
         del self._pending[match]                                   # one-time use
         return self.issue(name, platform, app_version)
 
-    def issue(self, name: str, platform: str, app_version: str) -> dict[str, Any]:
-        """New device + token (only its hash is kept)."""
+    def issue(self, name: str, platform: str, app_version: str, *, ttl_days: int = TOKEN_TTL_DAYS) -> dict[str, Any]:
+        """New device + token (only its hash is kept). expiresAt = now + ttl_days."""
         now = time.time()
         device_id, token = f"dev_{uuid.uuid4().hex[:12]}", secrets.token_urlsafe(32)
+        expires_at = now + ttl_days * 86400
         self._devices[device_id] = {
             "name": name or "phone", "platform": platform, "appVersion": app_version,
-            "tokenHash": _hash(token), "createdAt": _iso(now), "lastSeen": _iso(now), "revoked": False,
+            "tokenHash": _hash(token), "createdAt": _iso(now), "lastSeen": _iso(now),
+            "expiresAt": expires_at, "revoked": False,
         }
         self._save()
-        return {"deviceId": device_id, "deviceToken": token}
+        return {"deviceId": device_id, "deviceToken": token, "expiresAt": _iso(expires_at)}
 
     def authenticate(self, token: str) -> Optional[str]:
         if not token:
@@ -162,6 +179,60 @@ class DeviceStore:
 
     def device_name(self, device_id: str) -> str:
         return self._devices.get(device_id, {}).get("name", "phone")
+
+    def authenticate_with_rotation(self, token: str) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+        """Like authenticate() but also checks expiry and issues a new token if needed.
+
+        Returns (device_id, new_token_dict_or_None). new_token_dict is set when
+        the token was rotated (expired or near expiry). Caller should send it to the client.
+        """
+        if not token:
+            return None, None
+        h = _hash(token)
+        now = time.time()
+        rotated = None
+        for device_id, d in list(self._devices.items()):
+            if d.get("revoked") or not hmac.compare_digest(d["tokenHash"], h):
+                continue
+            expires = d.get("expiresAt")
+            if expires and expires < now:
+                # Expired — revoke and issue new
+                d["revoked"] = True
+                rotated = self.issue(d.get("name", "phone"), d.get("platform", ""), d.get("appVersion", ""))
+                rotated["device_id"] = device_id  # keep same logical device
+                rotated["old_revoked"] = True
+                self._save()
+                return device_id, rotated
+            elif expires and expires < now + 7 * 86400:
+                # Near expiry — rotate silently
+                d["revoked"] = True
+                rotated = self.issue(d.get("name", "phone"), d.get("platform", ""), d.get("appVersion", ""))
+                rotated["device_id"] = device_id
+                self._save()
+                return device_id, rotated
+            else:
+                d["lastSeen"] = _iso(now)
+                self._save()
+                return device_id, None
+        return None, None
+
+    def list_devices(self) -> list[dict[str, Any]]:
+        return [
+            {"deviceId": did, "name": d.get("name", ""), "platform": d.get("platform", ""),
+             "appVersion": d.get("appVersion", ""), "createdAt": d.get("createdAt"),
+             "lastSeen": d.get("lastSeen"), "expiresAt": _iso(d.get("expiresAt")) if d.get("expiresAt") else None,
+             "revoked": d.get("revoked", False)}
+            for did, d in self._devices.items()
+        ]
+
+    def get_device(self, device_id: str) -> Optional[dict[str, Any]]:
+        d = self._devices.get(device_id)
+        if not d:
+            return None
+        return {"deviceId": device_id, "name": d.get("name", ""), "platform": d.get("platform", ""),
+                "appVersion": d.get("appVersion", ""), "createdAt": d.get("createdAt"),
+                "lastSeen": d.get("lastSeen"), "expiresAt": _iso(d.get("expiresAt")) if d.get("expiresAt") else None,
+                "revoked": d.get("revoked", False)}
 
     def revoke(self, device_id: str) -> bool:
         if device_id in self._devices:
@@ -294,6 +365,171 @@ class StateReader:
         return [self._msg(r) for r in rows]
 
 
+# ── T16: tus upload store ────────────────────────────────────────────────────
+
+class UploadStore:
+    """Manages resumable (tus) file uploads from the phone.
+
+    Each upload creates two files in mate-data's tmp/uploads/:
+      <uploadId>.part  — the bytes received so far
+      <uploadId>.json  — metadata {sha256, size, offset, recordingId, device, startedAt, expiresAt}
+    On completion the .part is moved to inbox/<sha256>.<ext> and a companion .json is written.
+    """
+
+    def __init__(self, base_dir: Path, mate_data: Path) -> None:
+        self.dir = mate_data / UPLOADS_DIR
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self._inbox = mate_data / "inbox"
+        self._inbox.mkdir(parents=True, exist_ok=True)
+        self._base = base_dir  # phone_bridge home
+        self._prune()
+
+    def _meta_path(self, upload_id: str) -> Path:
+        return self.dir / f"{upload_id}.json"
+
+    def _data_path(self, upload_id: str) -> Path:
+        return self.dir / f"{upload_id}.part"
+
+    def _prune(self) -> None:
+        """Remove expired uploads."""
+        now = time.time()
+        for f in self.dir.glob("*.json"):
+            try:
+                meta = json.loads(f.read_text("utf-8"))
+                if meta.get("expiresAt", 0) < now:
+                    f.unlink(missing_ok=True)
+                    self._data_path(f.stem).unlink(missing_ok=True)
+            except (OSError, ValueError):
+                pass
+
+    def create(self, sha256: str, size: int, recording_id: str, device: str, started_at: float,
+               ext: str = ".bin") -> Optional[dict[str, Any]]:
+        """Start or resume an upload by sha256. Returns existing if already completed."""
+        now = time.time()
+        # Idempotency: check inbox for a completed file with this sha256
+        inbox_file = self._inbox / f"{sha256}{ext}"
+        inbox_meta = self._inbox / f"{sha256}.json"
+        if inbox_file.exists():
+            try:
+                existing = json.loads(inbox_meta.read_text("utf-8"))
+                return {"uploadId": existing.get("uploadId", f"done_{sha256[:12]}"),
+                        "offset": size, "complete": True,
+                        "sha256": sha256, "path": str(inbox_file)}
+            except (OSError, ValueError):
+                pass
+        # Also check partial uploads with same sha256
+        for f in self.dir.glob("*.json"):
+            try:
+                meta = json.loads(f.read_text("utf-8"))
+                if meta.get("sha256") == sha256 and meta.get("expiresAt", 0) > now:
+                    upload_id = f.stem
+                    offset = os.path.getsize(self._data_path(upload_id))
+                    return {"uploadId": upload_id, "offset": offset, "complete": offset >= meta["size"]}
+            except (OSError, ValueError):
+                continue
+        # Create new upload
+        upload_id = f"up_{uuid.uuid4().hex[:16]}"
+        expires_at = now + UPLOAD_EXPIRES_HOURS * 3600
+        meta = {
+            "sha256": sha256, "size": size, "offset": 0,
+            "recordingId": recording_id, "device": device, "startedAt": started_at,
+            "ext": ext, "createdAt": now, "expiresAt": expires_at,
+        }
+        self._meta_path(upload_id).write_text(json.dumps(meta, indent=2), "utf-8")
+        self._data_path(upload_id).touch()
+        return {"uploadId": upload_id, "offset": 0, "complete": False, "expiresAt": expires_at}
+
+    def info(self, upload_id: str) -> Optional[dict[str, Any]]:
+        """HEAD: return current upload state or None."""
+        mp = self._meta_path(upload_id)
+        if not mp.exists():
+            return None
+        try:
+            meta = json.loads(mp.read_text("utf-8"))
+            dp = self._data_path(upload_id)
+            meta["offset"] = os.path.getsize(dp) if dp.exists() else meta.get("offset", 0)
+            return meta
+        except (OSError, ValueError):
+            return None
+
+    def append(self, upload_id: str, chunk: bytes, offset: int, chunk_sha256: str) -> Optional[str]:
+        """Append a chunk. Returns error message or None on success."""
+        mp = self._meta_path(upload_id)
+        if not mp.exists():
+            return "upload not found"
+        try:
+            meta = json.loads(mp.read_text("utf-8"))
+        except (OSError, ValueError):
+            return "corrupt upload metadata"
+        if time.time() > meta.get("expiresAt", 0):
+            return "upload expired"
+        if offset != meta.get("offset", 0):
+            return f"offset mismatch: expected {meta['offset']}, got {offset}"
+        # Verify chunk sha256
+        actual = hashlib.sha256(chunk).hexdigest()
+        if not hmac.compare_digest(actual, chunk_sha256):
+            return f"checksum mismatch: expected {chunk_sha256}, got {actual}"
+        dp = self._data_path(upload_id)
+        with open(dp, "ab") as f:
+            f.write(chunk)
+        meta["offset"] = os.path.getsize(dp)
+        if meta["offset"] >= meta["size"]:
+            # File complete — verify full sha256
+            full_hash = hashlib.sha256()
+            with open(dp, "rb") as f:
+                while True:
+                    buf = f.read(64 * 1024)
+                    if not buf:
+                        break
+                    full_hash.update(buf)
+            if not hmac.compare_digest(full_hash.hexdigest(), meta["sha256"]):
+                return "full file checksum mismatch"
+            # Move to inbox
+            ext = meta.get("ext", ".bin")
+            dest = self._inbox / f"{meta['sha256']}{ext}"
+            dp.replace(dest)
+            # Write companion metadata
+            inbox_meta = self._inbox / f"{meta['sha256']}.json"
+            inbox_meta.write_text(json.dumps({
+                "uploadId": upload_id, "sha256": meta["sha256"], "size": meta["size"],
+                "recordingId": meta.get("recordingId"), "device": meta.get("device"),
+                "startedAt": meta.get("startedAt"), "completedAt": _iso(time.time()),
+            }, indent=2), "utf-8")
+            mp.unlink(missing_ok=True)
+            meta["offset"] = meta["size"]
+            meta["complete"] = True
+        else:
+            mp.write_text(json.dumps(meta, indent=2), "utf-8")
+        return None
+
+    def delete(self, upload_id: str) -> bool:
+        mp = self._meta_path(upload_id)
+        dp = self._data_path(upload_id)
+        any_deleted = False
+        if mp.exists():
+            mp.unlink()
+            any_deleted = True
+        if dp.exists():
+            dp.unlink()
+            any_deleted = True
+        return any_deleted
+
+    def prune_now(self) -> int:
+        """Remove expired uploads. Returns count removed."""
+        now = time.time()
+        removed = 0
+        for f in list(self.dir.glob("*.json")):
+            try:
+                meta = json.loads(f.read_text("utf-8"))
+                if meta.get("expiresAt", 0) < now:
+                    f.unlink(missing_ok=True)
+                    self._data_path(f.stem).unlink(missing_ok=True)
+                    removed += 1
+            except (OSError, ValueError):
+                pass
+        return removed
+
+
 # ── adapter ─────────────────────────────────────────────────────────────────
 
 class _Client:
@@ -314,7 +550,9 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         home = _hermes_home()
         db = extra.get("db_path") or str(home / "state.db")
         self._state = StateReader(Path(db))
-        self._devices = DeviceStore(Path(extra.get("devices_path") or home / "phone_bridge" / "devices.json"))
+        self._bridge_home = home / "phone_bridge"
+        self._bridge_home.mkdir(parents=True, exist_ok=True)
+        self._devices = DeviceStore(Path(extra.get("devices_path") or self._bridge_home / "devices.json"))
         self._hub_id = hashlib.sha256(f"{socket.gethostname()}:{home}".encode()).hexdigest()[:12]
         self._dedup = MessageDeduplicator(max_size=1000, ttl_seconds=600)
         self._clients: set[_Client] = set()
@@ -331,7 +569,19 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         self._notify = _truthy(extra.get("notify", True))
         self._notify_id: Optional[str] = None
         self._projects = ProjectIndex()
-        self._chat_projects = ChatProjects(Path(extra.get("projects_path") or home / "phone_bridge" / "projects.json"))
+        self._chat_projects = ChatProjects(Path(extra.get("projects_path") or self._bridge_home / "projects.json"))
+        # T16: tus uploads
+        mate_data = Path(extra.get("mate_data") or os.path.expanduser("~/mate-data"))
+        self._uploads = UploadStore(self._bridge_home, mate_data)
+        # T16: TLS
+        self._tls_dir = self._bridge_home / TLS_DIR
+        self._tls_dir.mkdir(parents=True, exist_ok=True)
+        self._ssl_ctx: Optional[ssl.SSLContext] = None
+        # T15: presence mirror
+        self._mate_data = mate_data
+        self._presence: dict[str, Any] = {}
+        self._presence_mtime: float = 0.0
+        self._presence_changed_at: float = 0.0
 
     # lifecycle ------------------------------------------------------------
     async def connect(self, *, is_reconnect: bool = False) -> bool:
@@ -340,6 +590,8 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
             return False
         try:
             self._cursor = await asyncio.to_thread(self._state.max_message_id)
+            # T16: TLS
+            self._ssl_ctx = await asyncio.to_thread(self._ensure_tls)
             app = web.Application(middlewares=[self._auth_middleware], client_max_size=MAX_UPLOAD_BYTES + 1024 * 1024)
             r = app.router
             r.add_get("/v1/health", self._h_health)
@@ -360,14 +612,22 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
             r.add_get("/pair/requests", self._h_pair_requests_list)
             r.add_post("/pair/requests/{rid}/{decision}", self._h_pair_decide)
             r.add_get("/v1/ws", self._h_ws)
+            # T16: tus upload endpoints
+            r.add_post("/v1/uploads", self._h_uploads_create)
+            r.add_head("/v1/uploads/{uid}", self._h_uploads_head)
+            r.add_patch("/v1/uploads/{uid}", self._h_uploads_patch)
+            r.add_delete("/v1/uploads/{uid}", self._h_uploads_delete)
+            # T16: device management
+            r.add_get("/v1/devices", self._h_devices_list)
             self._runner = web.AppRunner(app)
             await self._runner.setup()
-            await web.TCPSite(self._runner, self._host, self._port).start()
+            await web.TCPSite(self._runner, self._host, self._port, ssl_context=self._ssl_ctx).start()
             self._poll_task = asyncio.create_task(self._poll_loop(), name="phone-bridge-poll")
             self._mark_connected()
             self._wire_plugin_handlers(None)
-            logger.info("[phone] listening on %s:%s (cursor=%s, paired devices=%s)",
-                        self._host, self._port, self._cursor, self._devices.count())
+            scheme = "https" if self._ssl_ctx else "http"
+            logger.info("[phone] listening on %s://%s:%s (cursor=%s, paired devices=%s, tls=%s)",
+                        scheme, self._host, self._port, self._cursor, self._devices.count(), bool(self._ssl_ctx))
             return True
         except Exception as e:
             logger.error("[phone] failed to start: %s", e)
@@ -442,6 +702,9 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
                 except asyncio.TimeoutError:
                     pass
                 self._wake.clear()
+                # T15: check presence.json for changes
+                await self._poll_presence()
+
                 if not self._clients:
                     # Nobody listening: keep the cursor current so a later hello replays via ``since``.
                     self._cursor = await asyncio.to_thread(self._state.max_message_id)
@@ -487,14 +750,51 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
             except Exception:
                 self._clients.discard(c)
 
+    # T15: presence mirror --------------------------------------------------------
+    async def _poll_presence(self) -> None:
+        """Poll presence.json, debounce 2s, broadcast ``presence.updated`` on change."""
+        path = self._mate_data / PRESENCE_FILE
+        try:
+            mtime = await asyncio.to_thread(lambda: path.stat().st_mtime)
+        except OSError:
+            return
+        if mtime == self._presence_mtime:
+            return
+        # File changed — start or extend debounce window
+        now = time.time()
+        if self._presence_changed_at == 0:
+            self._presence_changed_at = now
+        elif now - self._presence_changed_at < PRESENCE_DEBOUNCE_S:
+            return  # still in debounce window
+        # Debounce elapsed: read and broadcast
+        self._presence_mtime = mtime
+        self._presence_changed_at = 0
+        try:
+            data = json.loads(await asyncio.to_thread(lambda: path.read_text("utf-8")))
+        except (OSError, ValueError):
+            return
+        if data == self._presence:
+            return
+        self._presence = data
+        event: dict[str, Any] = {
+            "type": "presence.updated",
+            "state": data.get("state"),
+            "current_block": data.get("current_block"),
+            "last_kick": data.get("last_kick"),
+            "last_brief": data.get("last_brief"),
+            "avatar": data.get("avatar"),
+            "updated_at": data.get("updated_at"),
+        }
+        await self._broadcast(event)
+
     # http -----------------------------------------------------------------
     @web.middleware
     async def _auth_middleware(self, request: "web.Request", handler):
-        if (request.path in ("/v1/health", "/v1/pair/complete", "/v1/pair/start", "/v1/pair/request", "/pair")
-                or request.path.startswith(("/v1/pair/request/", "/pair/requests"))):
+        if (request.path in ("/v1/health", "/v1/pair/complete", "/v1/pair/start", "/v1/pair/request", "/pair", "/v1/ws")
+                or request.path.startswith(("/v1/pair/request/", "/pair/requests", "/v1/uploads"))):
             return await handler(request)
         auth = request.headers.get("Authorization", "")
-        token = auth[7:].strip() if auth.startswith("Bearer ") else request.query.get("access_token", "")
+        token = auth[7:].strip() if auth.startswith("Bearer ") else ""
         device_id = self._devices.authenticate(token)
         if not device_id:
             return web.json_response({"error": {"code": "UNAUTHORIZED", "message": "pair this device first"}}, status=401)
@@ -532,7 +832,7 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
                                           str(body.get("appVersion", "")))
         if not res:
             return self._err(400, "PAIR_CODE_INVALID", "unknown, used or expired code")
-        return web.json_response({**res, "tokenType": "Bearer", "expiresAt": None, "hub": await self._hub_info()},
+        return web.json_response({**res, "tokenType": "Bearer", "hub": await self._hub_info()},
                                  status=201)
 
     async def _get_addresses(self) -> list[str]:
@@ -542,8 +842,12 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         return self._addresses
 
     async def _hub_info(self) -> dict[str, Any]:
-        return {"displayName": socket.gethostname().split(".")[0], "hubId": self._hub_id,
+        info = {"displayName": socket.gethostname().split(".")[0], "hubId": self._hub_id,
                 "addresses": await self._get_addresses()}
+        fp = await asyncio.to_thread(lambda: self._tls_fingerprint)
+        if fp:
+            info["tlsFingerprint"] = fp
+        return info
 
     # one-tap pairing ---------------------------------------------------------
     def _is_local(self, request: "web.Request") -> bool:
@@ -648,6 +952,118 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         logger.info("[phone] pairing request %s: %s", r["name"], r["status"])
         return web.json_response({"ok": True, "status": r["status"]})
 
+    # T16: tus upload handlers --------------------------------------------------
+    @staticmethod
+    def _parse_tus_meta(value: str) -> dict[str, str]:
+        """Parse tus Upload-Metadata header: name <base64>,name <base64>,..."""
+        out = {}
+        if not value:
+            return out
+        for part in value.split(","):
+            part = part.strip()
+            if " " in part:
+                k, b64 = part.split(" ", 1)
+            else:
+                k, b64 = part, ""
+            out[k.strip()] = b64.strip()
+        return out
+
+    async def _h_uploads_create(self, request: "web.Request") -> "web.Response":
+        """POST /v1/uploads — tus creation. Idempotent by sha256 content."""
+        try:
+            body = await request.json()
+        except ValueError:
+            return self._err(400, "VALIDATION_ERROR", "invalid JSON")
+        sha256 = str(body.get("sha256", "")).strip()
+        if not sha256 or len(sha256) != 64:
+            return self._err(400, "VALIDATION_ERROR", "sha256 required (64 hex chars)")
+        try:
+            size = int(body.get("size", 0))
+        except (ValueError, TypeError):
+            return self._err(400, "VALIDATION_ERROR", "size must be an integer")
+        if size <= 0 or size > MAX_UPLOAD_BYTES * 4:
+            return self._err(400, "VALIDATION_ERROR", f"size must be 1..{MAX_UPLOAD_BYTES * 4}")
+        recording_id = str(body.get("recordingId", "")).strip()
+        kind = str(body.get("kind", "audio")).strip()
+        ext = ".wav" if kind == "audio" else ".bin"
+        device = request.get("device_id", "unknown")
+        started_at = body.get("startedAt", time.time())
+        result = await asyncio.to_thread(self._uploads.create, sha256, size, recording_id, device, started_at, ext)
+        if not result:
+            return self._err(500, "UPLOAD_FAILED", "could not create upload")
+        if result.get("complete"):
+            return web.json_response({
+                "uploadId": result["uploadId"], "offset": result["offset"],
+                "complete": True, "sha256": sha256, "path": result.get("path"),
+            }, status=200)
+        return web.json_response({
+            "uploadId": result["uploadId"], "offset": result["offset"],
+            "complete": False, "expiresAt": result.get("expiresAt"),
+        }, status=201)
+
+    async def _h_uploads_head(self, request: "web.Request") -> "web.Response":
+        """HEAD /v1/uploads/{uid} — return current offset."""
+        uid = request.match_info["uid"]
+        meta = await asyncio.to_thread(self._uploads.info, uid)
+        if not meta:
+            return self._err(404, "UPLOAD_NOT_FOUND", "no such upload")
+        return web.Response(
+            headers={"Upload-Offset": str(meta.get("offset", 0)),
+                     "Upload-Length": str(meta.get("size", 0)),
+                     "Upload-Expires": _iso(meta.get("expiresAt")) or ""},
+        )
+
+    async def _h_uploads_patch(self, request: "web.Request") -> "web.Response":
+        """PATCH /v1/uploads/{uid} — append a chunk with sha256 checksum."""
+        uid = request.match_info["uid"]
+        offset_header = request.headers.get("Upload-Offset", "")
+        try:
+            offset = int(offset_header)
+        except (ValueError, TypeError):
+            return self._err(400, "VALIDATION_ERROR", "Upload-Offset header required")
+        checksum_header = request.headers.get("Upload-Checksum", "")
+        # Format: sha256 <hex>
+        if " " not in checksum_header:
+            return self._err(400, "VALIDATION_ERROR", "Upload-Checksum header required: sha256 <hex>")
+        algo, expected = checksum_header.split(" ", 1)
+        if algo.lower() != "sha256" or len(expected.strip()) != 64:
+            return self._err(400, "VALIDATION_ERROR", "Upload-Checksum must be sha256 <64 hex chars>")
+        expected = expected.strip().lower()
+        chunk = await request.read()
+        if not chunk:
+            return self._err(400, "VALIDATION_ERROR", "empty chunk")
+        if len(chunk) > CHUNK_SIZE_MAX:
+            return self._err(413, "CHUNK_TOO_LARGE", f"max chunk size is {CHUNK_SIZE_MAX} bytes")
+        error = await asyncio.to_thread(self._uploads.append, uid, chunk, offset, expected)
+        if error:
+            if "checksum mismatch" in error.lower():
+                return self._err(460, "CHECKSUM_MISMATCH", error)
+            if "expired" in error.lower():
+                return self._err(410, "UPLOAD_EXPIRED", error)
+            if "not found" in error.lower():
+                return self._err(404, "UPLOAD_NOT_FOUND", error)
+            return self._err(400, "UPLOAD_ERROR", error)
+        meta = await asyncio.to_thread(self._uploads.info, uid)
+        offset = meta.get("offset", 0) if meta else 0
+        complete = meta.get("complete", False) if meta else False
+        resp = web.Response(headers={"Upload-Offset": str(offset)})
+        if complete:
+            resp.headers["Upload-Completed"] = "1"
+        return resp
+
+    async def _h_uploads_delete(self, request: "web.Request") -> "web.Response":
+        """DELETE /v1/uploads/{uid} — cancel an upload."""
+        uid = request.match_info["uid"]
+        ok = await asyncio.to_thread(self._uploads.delete, uid)
+        if not ok:
+            return self._err(404, "UPLOAD_NOT_FOUND", "no such upload")
+        return web.json_response({"ok": True})
+
+    async def _h_devices_list(self, request: "web.Request") -> "web.Response":
+        """GET /v1/devices — list all paired devices."""
+        devices = await asyncio.to_thread(self._devices.list_devices)
+        return web.json_response({"items": devices})
+
     # projects ---------------------------------------------------------------
     def _project_of(self, item: dict[str, Any]) -> Optional[str]:
         return (self._chat_projects.session(item["id"])
@@ -735,25 +1151,73 @@ class PhoneBridgeAdapter(BasePlatformAdapter):
         return web.json_response({"chatId": request.match_info["chat_id"], "sessionId": sid})
 
     def _phone_urls(self) -> list[str]:
-        """Addresses a phone can use: Tailscale first (works anywhere), then LAN."""
+        """Addresses a phone can use: Tailscale first (works anywhere), then LAN.
+        T16: all URLs use https:// (TLS on the bridge)."""
         urls: list[str] = []
+        scheme = "https"
         try:
-            import subprocess
             out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3).stdout
-            urls += [f"http://{ip.strip()}:{self._port}" for ip in out.split() if ip.strip()]
+            urls += [f"{scheme}://{ip.strip()}:{self._port}" for ip in out.split() if ip.strip()]
             st = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=3).stdout
             dns = (json.loads(st).get("Self") or {}).get("DNSName", "").rstrip(".") if st else ""
-            if dns:  # after the IP: Android Tailscale does not always resolve *.ts.net
-                urls.append(f"http://{dns}:{self._port}")
+            if dns:
+                urls.append(f"{scheme}://{dns}:{self._port}")
         except Exception:
             pass
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sk:
                 sk.connect(("10.255.255.255", 1))
-                urls.append(f"http://{sk.getsockname()[0]}:{self._port}")
+                urls.append(f"{scheme}://{sk.getsockname()[0]}:{self._port}")
         except OSError:
             pass
         return list(dict.fromkeys(urls))
+
+    # T16: TLS -----------------------------------------------------------------
+    def _ensure_tls(self) -> Optional[ssl.SSLContext]:
+        """Create or load a self-signed TLS certificate for the bridge.
+        Returns None if TLS setup fails (fallback to plain HTTP)."""
+        cert_path = self._tls_dir / "cert.pem"
+        key_path = self._tls_dir / "key.pem"
+        if not cert_path.exists() or not key_path.exists():
+            logger.info("[phone] generating self-signed TLS certificate in %s", self._tls_dir)
+            try:
+                subprocess.run([
+                    "openssl", "req", "-x509", "-newkey", "rsa:4096", "-sha256", "-days", "3650", "-nodes",
+                    "-keyout", str(key_path), "-out", str(cert_path),
+                    "-subj", "/CN=hermes-phone-bridge.local",
+                    "-addext", "subjectAltName=DNS:hermes-phone-bridge.local,DNS:localhost,IP:127.0.0.1",
+                ], capture_output=True, text=True, timeout=10, check=True)
+                key_path.chmod(0o600)
+                cert_path.chmod(0o644)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                logger.warning("[phone] cannot generate TLS cert (openssl not found?): %s", e)
+                return None
+        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        try:
+            ctx.load_cert_chain(str(cert_path), str(key_path))
+        except Exception as e:
+            logger.warning("[phone] cannot load TLS cert: %s", e)
+            return None
+        return ctx
+
+    @property
+    def _tls_fingerprint(self) -> str:
+        """SHA-256 fingerprint of the TLS certificate, as shown by openssl x509 -fingerprint -sha256."""
+        cert_path = self._tls_dir / "cert.pem"
+        if not cert_path.exists():
+            return ""
+        try:
+            out = subprocess.run(
+                ["openssl", "x509", "-fingerprint", "-sha256", "-noout", "-in", str(cert_path)],
+                capture_output=True, text=True, timeout=5
+            )
+            if out.returncode == 0:
+                # "SHA256 Fingerprint=AB:CD:..." -> "AB:CD:..."
+                fp = out.stdout.strip().split("=", 1)[-1].strip()
+                return fp
+        except (FileNotFoundError, Exception):
+            pass
+        return ""
 
     @staticmethod
     def _qr_svg(text: str) -> str:
@@ -1006,8 +1470,10 @@ load(); setInterval(load, 1500);
     async def _h_ws(self, request: "web.Request") -> "web.WebSocketResponse":
         ws = web.WebSocketResponse(heartbeat=25)
         await ws.prepare(request)
-        client = _Client(ws, request["device_id"])
+        # T16: token comes from client.hello, not URL
+        client = _Client(ws, "pending")
         self._clients.add(client)
+        authenticated = False
         try:
             async for msg in ws:
                 if msg.type != WSMsgType.TEXT:
@@ -1019,9 +1485,26 @@ load(); setInterval(load, 1500);
                     continue
                 kind = frame.get("type")
                 if kind == "client.hello":
+                    rotated = None
+                    if not authenticated:
+                        # Authenticate from the token in the hello frame
+                        token = str(frame.get("token", "") or "")
+                        device_id, rotated = await asyncio.to_thread(
+                            self._devices.authenticate_with_rotation, token)
+                        if not device_id:
+                            await ws.send_json({"type": "error", "code": "UNAUTHORIZED",
+                                                "message": "pair this device first"})
+                            await ws.close(4001, "unauthorized")
+                            return ws
+                        client.device_id = device_id
+                        authenticated = True
                     client.sessions = {s for s in frame.get("sessions", []) if isinstance(s, str)}
-                    await ws.send_json({"type": "server.hello", "apiVersion": API_VERSION, "cursor": self._cursor,
-                                        "serverTime": _iso(time.time())})
+                    hello: dict[str, Any] = {"type": "server.hello", "apiVersion": API_VERSION,
+                                              "cursor": self._cursor, "serverTime": _iso(time.time())}
+                    if rotated:
+                        hello["token"] = rotated.get("deviceToken")
+                        hello["tokenExpiresAt"] = rotated.get("expiresAt")
+                    await ws.send_json(hello)
                     since = frame.get("since")
                     if isinstance(since, int) and since < self._cursor:
                         missed = await asyncio.to_thread(self._state.since, since, REPLAY_LIMIT)
@@ -1031,6 +1514,18 @@ load(); setInterval(load, 1500);
                                                     "message": m, "replay": True})
                     working = await asyncio.to_thread(self._state.active_leases)
                     await ws.send_json({"type": "status.snapshot", "working": sorted(working)})
+                    # T15: push current presence state immediately on connect
+                    if self._presence:
+                        presence_ev: dict[str, Any] = {
+                            "type": "presence.updated",
+                            "state": self._presence.get("state"),
+                            "current_block": self._presence.get("current_block"),
+                            "last_kick": self._presence.get("last_kick"),
+                            "last_brief": self._presence.get("last_brief"),
+                            "avatar": self._presence.get("avatar"),
+                            "updated_at": self._presence.get("updated_at"),
+                        }
+                        await ws.send_json(presence_ev)
                 elif kind == "client.subscribe":
                     client.sessions |= {s for s in frame.get("sessions", []) if isinstance(s, str)}
                 elif kind == "client.unsubscribe":

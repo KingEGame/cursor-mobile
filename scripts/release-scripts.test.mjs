@@ -10,7 +10,7 @@ import { versionCodeFor } from "./version-code.mjs";
 
 const ok = {
   badging: "package: name='local.hermes.phone' versionCode='200' versionName='0.2.0'\nuses-permission: name='android.permission.INTERNET'",
-  manifestTree: "A: android:usesCleartextTraffic(0x010104ec)=true",
+  manifestTree: "A: android:usesCleartextTraffic(0x010104ec)=false",
 };
 
 describe("versionCodeFor", () => {

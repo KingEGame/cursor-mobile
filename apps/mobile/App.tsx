@@ -8,9 +8,11 @@ import { BridgeProvider, useBridge } from './src/bridge/BridgeProvider';
 import { LockGate } from './src/components/LockGate';
 import type { RootStackParamList } from './src/navigation/types';
 import { ChatScreen } from './src/screens/ChatScreen';
+import { MateScreen } from './src/screens/MateScreen';
 import { PairScreen } from './src/screens/PairScreen';
 import { ProjectScreen } from './src/screens/ProjectScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
+import { RecordConversationScreen } from './src/screens/RecordConversationScreen';
 import { SessionsScreen } from './src/screens/SessionsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { colors } from './src/theme';
@@ -71,6 +73,8 @@ function Root() {
           <Stack.Screen name="Project" component={ProjectScreen} options={{ title: 'Project' }} />
           <Stack.Screen name="Chat" component={ChatScreen} options={{ title: 'Chat' }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+          <Stack.Screen name="Mate" component={MateScreen} options={{ headerShown: false, animation: 'fade' }} />
+          <Stack.Screen name="Record" component={RecordConversationScreen} options={{ title: 'Record conversation' }} />
         </Stack.Navigator>
       </LockGate>
     </NavigationContainer>

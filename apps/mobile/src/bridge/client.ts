@@ -249,9 +249,13 @@ export class BridgeClient {
   }
 }
 
-export function wsUrl(baseUrl: string, token: string): string {
+export function wsUrl(baseUrl: string, token?: string): string {
   const b = normalizeBaseUrl(baseUrl).replace(/^http/i, 'ws');
-  return `${b}/v1/ws?access_token=${encodeURIComponent(token)}`;
+  // T16: token in client.hello frame, not URL
+  if (token) {
+    return `${b}/v1/ws?access_token=${encodeURIComponent(token)}`;
+  }
+  return `${b}/v1/ws`;
 }
 
 export function newClientMessageId(): string {

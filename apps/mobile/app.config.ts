@@ -40,7 +40,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'android.permission.READ_MEDIA_VIDEO',
         'android.permission.READ_EXTERNAL_STORAGE',
         'android.permission.WRITE_EXTERNAL_STORAGE',
-        'android.permission.RECORD_AUDIO',
       ],
     },
     plugins: [
@@ -56,9 +55,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       './plugins/with-release-signing',
-      // The bridge speaks HTTP on Tailscale (WireGuard encrypts it); Expo ignores
-      // android.usesCleartextTraffic, so the manifest flag comes from this plugin.
+      // The bridge speaks only TLS (T16); the manifest flag enforces it.
       './plugins/with-cleartext-hub',
+      // T16: no app data should be backed up to the cloud.
+      './plugins/with-no-backup',
+      // T11: audio recording
+      ['expo-audio', { enableBackgroundRecording: true, recordAudioAndroid: true }],
+      'expo-sqlite',
       // Camera only to scan the pairing QR shown on the PC.
       ['expo-camera', { cameraPermission: 'Scan the pairing QR code shown on your PC.', recordAudioAndroid: false }],
     ],

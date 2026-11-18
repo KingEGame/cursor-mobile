@@ -66,6 +66,7 @@ describe('mirror', () => {
   it('never asks for replay from 0 (would stream the oldest history)', () => {
     assert.deepEqual(helloFrame(0), { type: 'client.hello', sessions: [] });
     assert.deepEqual(helloFrame(42), { type: 'client.hello', sessions: [], since: 42 });
+    assert.deepEqual(helloFrame(0, 'tok'), { type: 'client.hello', sessions: [], token: 'tok' });
   });
 
   it('applies live messages to open sessions and bumps the list', () => {
@@ -138,6 +139,7 @@ describe('client', () => {
   it('normalizes addresses and builds the ws url', () => {
     assert.equal(normalizeBaseUrl(' 100.1.2.3:8097/ '), 'http://100.1.2.3:8097');
     assert.equal(wsUrl('https://pc.ts.net:8097', 'a b'), 'wss://pc.ts.net:8097/v1/ws?access_token=a%20b');
+    assert.equal(wsUrl('https://pc.ts.net:8097'), 'wss://pc.ts.net:8097/v1/ws');
   });
 
   it('sends bearer token and idempotency id', async () => {

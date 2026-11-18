@@ -1,6 +1,6 @@
 /**
  * Small Markdown parser for agent transcripts on the phone.
- * Covers what Cursor agents actually emit: headings, paragraphs, lists, fenced code,
+ * Covers what Hermes agents actually emit: headings, paragraphs, lists, fenced code,
  * pipe tables, and inline bold / italic / code / links. Anything else stays plain text.
  */
 

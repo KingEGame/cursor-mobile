@@ -19,6 +19,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import okhttp3.CertificatePinner
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -26,6 +27,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /**
@@ -53,11 +55,7 @@ class HermesBridgeService : Service() {
   }
 
   private val main = Handler(Looper.getMainLooper())
-  private val http = OkHttpClient.Builder()
-    .connectTimeout(5, TimeUnit.SECONDS)
-    .readTimeout(0, TimeUnit.MILLISECONDS)   // long-lived socket; liveness via pings
-    .pingInterval(45, TimeUnit.SECONDS)
-    .build()
+  private var httpClient: OkHttpClient? = null
   private var ws: WebSocket? = null
   private var config: BridgePrefs.Config? = null
   private var urlIndex = 0
@@ -109,20 +107,56 @@ class HermesBridgeService : Service() {
   }
 
   // connection -------------------------------------------------------------------------------------
+  private fun clientFor(cfg: BridgePrefs.Config): OkHttpClient {
+    val cb = OkHttpClient.Builder()
+      .connectTimeout(5, TimeUnit.SECONDS)
+      .readTimeout(0, TimeUnit.MILLISECONDS)   // long-lived socket; liveness via pings
+      .pingInterval(45, TimeUnit.SECONDS)
+    // T16: TLS certificate pinning
+    val fp = cfg.certFingerprint.trim()
+    if (fp.isNotEmpty() && fp.length >= 44) {  // SHA-256 base64 is 44 chars
+      try {
+        val host = hostOf(cfg.urls.firstOrNull() ?: "")
+        if (host.isNotEmpty()) {
+          cb.certificatePinner(CertificatePinner.Builder()
+            .add(host, "sha256/$fp")
+            .build())
+        }
+      } catch (_: Exception) {}
+    }
+    return cb.build()
+  }
+
+  private fun hostOf(url: String): String {
+    // http://100.1.2.3:8097 -> 100.1.2.3
+    val cleaned = url.trimStart()
+    var start = cleaned.indexOf("://")
+    if (start < 0) start = 0 else start += 3
+    val end = cleaned.indexOf(':', start)
+    return if (end < 0) "" else cleaned.substring(start, end)
+  }
+
   private fun connect() {
     val cfg = config ?: return
     if (stopped) return
     ws?.cancel()
     val gen = ++generation
+    val http = httpClient ?: clientFor(cfg).also { httpClient = it }
     val base = cfg.urls[urlIndex % cfg.urls.size].trimEnd('/')
-    val wsUrl = base.replaceFirst("http://", "ws://").replaceFirst("https://", "wss://") +
-      "/v1/ws?access_token=" + URLEncoder.encode(cfg.token, "UTF-8")
+    // T16: token sent in client.hello frame, not in URL
+    val wsUrl = base.replaceFirst("http://", "ws://").replaceFirst("https://", "wss://") + "/v1/ws"
     ws = http.newWebSocket(Request.Builder().url(wsUrl).build(), object : WebSocketListener() {
       override fun onOpen(webSocket: WebSocket, response: Response) {
         main.post {
           if (gen != generation) return@post
           failures = 0
-          webSocket.send("{\"type\":\"client.hello\",\"sessions\":[]}")
+          // T16: send token in client.hello
+          val hello = JSONObject().apply {
+            put("type", "client.hello")
+            put("sessions", JSONObject.NULL)
+            put("token", cfg.token)
+          }
+          webSocket.send(hello.toString())
           updateOngoing(getString(R.string.hermes_bg_connected, cfg.pcName))
         }
       }
@@ -188,7 +222,27 @@ class HermesBridgeService : Service() {
   // events -----------------------------------------------------------------------------------------
   private fun handle(text: String) {
     val ev = try { JSONObject(text) } catch (_: Exception) { return }
-    if (ev.optString("type") != "session.updated" || ev.optString("status") != "idle") return
+    when (ev.optString("type")) {
+      "session.updated" -> handleSessionUpdated(ev)
+      "presence.updated" -> handlePresenceUpdated(ev)
+    }
+  }
+
+  private fun handlePresenceUpdated(ev: JSONObject) {
+    val state = ev.optString("state", "")
+    val block = ev.optString("current_block", "")
+    val label = when (state) {
+      "on_task" -> "\u25CF On task"
+      "off_task" -> "\u25CF Off task"
+      "waiting_approval" -> "\u25CF Needs approval"
+      "idle" -> "\u25CF Idle"
+      else -> "Mate"
+    }
+    val note = if (block.isNotEmpty()) "$label \u2014 $block" else label
+    updateOngoing(note)
+  }
+
+  private fun handleSessionUpdated(ev: JSONObject) {
     val msg = ev.optJSONObject("lastMessage") ?: return
     if (msg.optString("role") != "assistant") return
     val content = msg.optString("content").trim()
