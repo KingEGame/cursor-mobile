@@ -58,8 +58,18 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      # JDK 17 + Android SDK come from node1 (runner .env); ~/.gradle persists between runs.
-      - run: java -version && echo "ANDROID_HOME=$ANDROID_HOME"
+      # JDK 17 + Android SDK live on node1 under /home/acewar/ci (user-level
+      # install: the runner account has no root, so they are exported here
+      # instead of the runner .env). ~/.gradle persists between runs.
+      - name: "Toolchain (node1 JDK 17 + Android SDK)"
+        run: |
+          [ -d /home/acewar/ci/jdk17 ] || { echo "::error::JDK 17 not found at /home/acewar/ci/jdk17"; exit 1; }
+          echo "JAVA_HOME=/home/acewar/ci/jdk17" >> "$GITHUB_ENV"
+          echo "/home/acewar/ci/jdk17/bin" >> "$GITHUB_PATH"
+          if [ -d /home/acewar/ci/android-sdk ] && [ -z "${ANDROID_HOME:-}" ]; then
+            echo "ANDROID_HOME=/home/acewar/ci/android-sdk" >> "$GITHUB_ENV"
+          fi
+          java -version && echo "ANDROID_HOME=$ANDROID_HOME"
       - run: npm ci
 
       - name: Tag matches app version
